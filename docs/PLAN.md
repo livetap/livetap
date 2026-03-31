@@ -750,25 +750,264 @@ tests/phase4/
 
 ### Phase 5: npm packaging + install flow
 
-**Goal:** `npm install livetap` or `bun add livetap` works. Postinstall writes .mcp.json. Package published to npm as `@livetap`.
+**Goal:** `npm install livetap` or `bun add livetap` works end-to-end. Postinstall auto-configures .mcp.json. Package published to npm as `@livetap`. A fresh user goes from zero to live data in Claude Code in under 2 minutes.
 
 **Build:**
-- `package.json` — name: `@livetap`, bin: `livetap`, postinstall script, keywords, description
-- `scripts/postinstall.ts` — Detect .mcp.json, add livetap entry if missing, print restart instructions
-- Ensure `bin/livetap.ts` works as global binary via `#!/usr/bin/env bun`
-- Bundle with `bun build` if needed for npm distribution
+
+**package.json** — final shape:
+```json
+{
+  "name": "@livetap",
+  "version": "0.1.0",
+  "description": "Push live data streams into your AI coding agent. Connect MQTT, Kafka, or webhooks.",
+  "type": "module",
+  "bin": {
+    "livetap": "./bin/livetap.ts"
+  },
+  "scripts": {
+    "postinstall": "bun ./scripts/postinstall.ts",
+    "test": "bun test"
+  },
+  "keywords": [
+    "mqtt", "kafka", "websocket", "webhook", "streaming",
+    "real-time", "monitoring", "alerts", "mcp", "claude-code",
+    "ai-agent", "iot", "observability", "data-pipeline"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/livetap/livetap"
+  },
+  "homepage": "https://github.com/livetap/livetap",
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "mqtt": "^5.15.0",
+    "redis-server": "^1.2.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/postinstall.ts",
+    "README.md",
+    "LICENSE"
+  ]
+}
+```
+
+Key decisions:
+- `"bin": { "livetap": "./bin/livetap.ts" }` — Bun runs .ts directly, no build step needed
+- `"files"` array controls what goes into the npm tarball — no tests, no docs, no .local
+- `"engines": { "bun": ">=1.0.0" }` — documents the requirement (npm doesn't enforce it, but signals clearly)
+- No `"main"` or `"module"` — this is a CLI tool, not a library
+
+**Postinstall** — `scripts/postinstall.ts`:
+
+Runs after `npm install livetap` or `bun add livetap`. Writes the .mcp.json entry and prints setup instructions.
+
+```typescript
+#!/usr/bin/env bun
+import { existsSync } from 'fs'
+import { resolve, dirname } from 'path'
+
+const MCP_ENTRY = {
+  livetap: {
+    command: 'bunx',
+    args: ['@livetap', 'mcp']    // starts the MCP channel proxy
+  }
+}
+
+// Find project root (walk up from node_modules/@livetap to find .mcp.json location)
+function findProjectRoot(): string {
+  let dir = resolve(import.meta.dir, '..', '..', '..')  // up from node_modules/@livetap/scripts
+  // Fallback: if we can't determine, use cwd
+  if (!existsSync(resolve(dir, 'package.json'))) dir = process.cwd()
+  return dir
+}
+
+function run() {
+  // Skip in CI or when LIVETAP_SKIP_POSTINSTALL is set
+  if (process.env.CI || process.env.LIVETAP_SKIP_POSTINSTALL) return
+
+  const root = findProjectRoot()
+  const mcpPath = resolve(root, '.mcp.json')
+
+  let config: any = {}
+  if (existsSync(mcpPath)) {
+    try {
+      config = JSON.parse(Bun.file(mcpPath).text())
+    } catch {
+      // malformed .mcp.json — don't clobber, warn instead
+      console.warn('\n⚠ .mcp.json exists but is malformed. Skipping auto-config.')
+      console.warn('  Add the livetap entry manually (see below).\n')
+      printManualInstructions()
+      return
+    }
+  }
+
+  // Don't overwrite if livetap entry already exists
+  if (config.mcpServers?.livetap) {
+    console.log('\n✓ livetap already configured in .mcp.json\n')
+    printRestartInstructions()
+    return
+  }
+
+  // Add livetap entry
+  config.mcpServers = { ...config.mcpServers, ...MCP_ENTRY }
+  Bun.write(mcpPath, JSON.stringify(config, null, 2) + '\n')
+
+  console.log('\n✓ livetap added to .mcp.json\n')
+  printRestartInstructions()
+}
+
+function printRestartInstructions() {
+  console.log('  To enable live data streaming in Claude Code, restart with:\n')
+  console.log('    claude --dangerously-load-development-channels server:livetap\n')
+  console.log('  Then ask Claude: "Connect to mqtt://broker.emqx.io:1883/sensors/#"\n')
+}
+
+function printManualInstructions() {
+  console.log('  Add to .mcp.json:\n')
+  console.log(`    ${JSON.stringify({ mcpServers: MCP_ENTRY }, null, 2)}\n`)
+}
+
+run()
+```
+
+Safety measures:
+- **Never clobbers** existing .mcp.json — reads, merges, writes
+- **Skips if livetap already present** — idempotent
+- **Skips in CI** — `CI` env var or `LIVETAP_SKIP_POSTINSTALL`
+- **Handles malformed .mcp.json** — warns, prints manual instructions, doesn't crash
+- **Finds project root** — walks up from `node_modules` to find the right `.mcp.json` location
+
+**`livetap mcp` subcommand** — the MCP entry point:
+
+The postinstall writes `"args": ["@livetap", "mcp"]` which runs `livetap mcp`. This is the thin MCP channel proxy from Phase 2 — started as a subprocess by Claude Code via .mcp.json.
+
+Add to `bin/livetap.ts`:
+```typescript
+mcp: () => import('../src/mcp/channel.js').then(m => m.run(args)),
+```
+
+This keeps the MCP entry point as part of the same binary — no separate file to find/resolve.
+
+**`.npmignore`** (belt and suspenders with `"files"` in package.json):
+```
+.local/
+.cursor/
+tests/
+docs/
+scripts/mqtt-bridge.ts
+scripts/livetap-channel.ts
+.mcp.json
+*.test.ts
+```
+
+**LICENSE** — MIT:
+```
+MIT License
+
+Copyright (c) 2026 livetap contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy...
+```
+
+**Pre-publish checklist** (automated in a `scripts/prepublish.ts`):
+```typescript
+// Run before npm publish
+// 1. Verify all tests pass
+// 2. Verify bin/livetap.ts has shebang
+// 3. Verify package.json has correct name, version, bin
+// 4. Verify README exists and is non-empty
+// 5. Verify LICENSE exists
+// 6. Dry run: npm pack --dry-run, verify file list
+```
+
+**Install flow — what happens step by step:**
+
+```bash
+# User in their project directory:
+bun add @livetap          # or: npm install @livetap
+
+# 1. Bun/npm downloads and installs @livetap + deps (mqtt, redis-server, MCP SDK)
+# 2. postinstall.ts runs:
+#    - Finds .mcp.json (creates if missing)
+#    - Adds livetap MCP server entry: { command: "bunx", args: ["@livetap", "mcp"] }
+#    - Prints:
+#
+#    ✓ livetap added to .mcp.json
+#
+#      To enable live data streaming in Claude Code, restart with:
+#
+#        claude --dangerously-load-development-channels server:livetap
+#
+#      Then ask Claude: "Connect to mqtt://broker.emqx.io:1883/sensors/#"
+
+# 3. User restarts Claude Code:
+claude --dangerously-load-development-channels server:livetap
+
+# 4. Claude Code reads .mcp.json, spawns `bunx @livetap mcp`
+#    → MCP proxy starts, auto-starts daemon if needed
+#    → Channel registered, tools available
+#    → User talks to agent: "tap into my MQTT stream..."
+```
+
+**Global install also works:**
+```bash
+bun install -g @livetap    # installs `livetap` binary globally
+livetap start              # start daemon from any directory
+livetap connect mqtt://broker.emqx.io:1883/sensors/#
+```
+When installed globally, postinstall writes to `~/.mcp.json` (user-level MCP config) instead of project-level.
 
 **Tests:**
 ```
 tests/phase5/
-├── postinstall.test.ts        # Run postinstall in temp dir → verify .mcp.json created/updated correctly
-├── postinstall-existing.test.ts  # .mcp.json already has other servers → livetap added without clobbering
-└── package-smoke.test.ts      # npm pack → install in temp dir → verify binary exists and runs --help
+├── postinstall-fresh.test.ts     # No .mcp.json exists → postinstall creates it with livetap entry
+├── postinstall-existing.test.ts  # .mcp.json has other servers → livetap added without clobbering others
+├── postinstall-already.test.ts   # .mcp.json already has livetap → no duplicate, prints "already configured"
+├── postinstall-malformed.test.ts # .mcp.json contains invalid JSON → warns, prints manual instructions, doesn't crash
+├── postinstall-ci-skip.test.ts   # CI=true → postinstall exits silently without writing
+├── package-contents.test.ts      # npm pack → verify tarball contains bin/, src/, README, LICENSE — no tests/docs/.local
+├── binary-smoke.test.ts          # Install tarball in temp dir → verify `livetap --help` works → verify `livetap --llm-help` outputs valid JSON
+└── mcp-entry.test.ts             # Verify `livetap mcp` starts MCP server on stdio (connect with MCP client, call list_connections)
 ```
 
 **Done gate:**
-- `bun test tests/phase5/` passes
-- Manual: `npm pack` → install tarball in fresh dir → postinstall writes .mcp.json → `npx livetap start` works
+- `bun test tests/phase5/` passes (~8 tests)
+- Manual — full clean-room test:
+  ```bash
+  # Build tarball
+  cd livetap && npm pack
+
+  # Fresh directory
+  mkdir /tmp/livetap-test && cd /tmp/livetap-test
+  bun init -y
+  bun add /path/to/livetap-0.1.0.tgz
+
+  # Verify postinstall
+  cat .mcp.json   # should have livetap entry
+
+  # Verify binary
+  bunx @livetap --help
+  bunx @livetap --llm-help | head
+
+  # Verify MCP entry point
+  bunx @livetap start
+  bunx @livetap status
+  bunx @livetap connect mqtt://broker.emqx.io:1883/justinx/demo/#
+  bunx @livetap sample <conn_id>
+  bunx @livetap stop
+
+  # Clean up
+  rm -rf /tmp/livetap-test
+  ```
 
 ---
 

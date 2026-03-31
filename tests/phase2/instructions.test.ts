@@ -1,11 +1,7 @@
 import { test, expect } from 'bun:test'
+import { generateInstructions } from '../../src/shared/catalog-generators.js'
 
-// Read the instructions directly from the channel module source
-const source = await Bun.file('src/mcp/channel.ts').text()
-
-// Extract the INSTRUCTIONS string
-const match = source.match(/const INSTRUCTIONS = `([\s\S]*?)`\.trim\(\)/)
-const instructions = match?.[1] ?? ''
+const instructions = generateInstructions()
 
 test('instructions contain workflow steps', () => {
   expect(instructions).toContain('WORKFLOW')
@@ -35,4 +31,11 @@ test('instructions explain channel events', () => {
 
 test('instructions tell agent to sample before watching', () => {
   expect(instructions).toContain('ALWAYS sample before creating a watcher')
+})
+
+test('instructions list all available tools', () => {
+  expect(instructions).toContain('AVAILABLE TOOLS')
+  expect(instructions).toContain('create_watcher')
+  expect(instructions).toContain('get_watcher_logs')
+  expect(instructions).toContain('restart_watcher')
 })

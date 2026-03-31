@@ -22,6 +22,9 @@ const commands: Record<string, () => Promise<void>> = {
 
 if (!cmd || cmd === '--help' || cmd === '-h') {
   await commands.help()
+} else if (cmd === '--llm-help') {
+  const { generateLlmHelp } = await import('../src/shared/catalog-generators.js')
+  console.log(JSON.stringify(generateLlmHelp(), null, 2))
 } else if (commands[cmd]) {
   await commands[cmd]()
 } else {

@@ -11,58 +11,12 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { registerTools } from './tools.js'
+import { generateInstructions } from '../shared/catalog-generators.js'
 
 const DAEMON_PORT = parseInt(process.env.LIVETAP_PORT || '8788')
 const DAEMON_URL = `http://127.0.0.1:${DAEMON_PORT}`
 
-const INSTRUCTIONS = `
-You have access to livetap, a live data streaming tool. Use it to connect to data sources, sample streams, and set up expression-based watchers that alert you when conditions match.
-
-WORKFLOW:
-1. CONNECT: Use create_connection to tap into a data source.
-   - MQTT: create_connection({ type: "mqtt", broker: "hostname", port: 1883, tls: false, topics: ["topic/#"], username: "", password: "" })
-   - WebSocket: create_connection({ type: "websocket", url: "wss://..." })
-   - Webhook: create_connection({ type: "webhook" }) → returns an ingest URL
-   Note: for MQTT, set tls: false and port: 1883 for unencrypted brokers.
-
-2. SAMPLE: Use read_stream to inspect what data is flowing.
-   - read_stream({ connectionId: "conn_xxx", backfillSeconds: 60, maxEntries: 10 })
-   - Study the JSON payload structure to find the correct dot-paths for watchers.
-   - ALWAYS sample before creating a watcher so you know the correct field paths.
-
-3. WATCH: Use create_watcher to set up expression-based alerts.
-   - create_watcher({ connectionId: "conn_xxx", conditions: [{ field: "sensors.temperature.value", op: ">", value: 50 }], match: "all", cooldown: 60 })
-   - Supported operators: >, <, >=, <=, ==, !=, contains
-   - match: "all" = AND (all conditions must be true), "any" = OR (at least one)
-   - cooldown: seconds between repeated alerts. Use 0 for rare events, 30-60 for sensors, 300+ for high-frequency.
-   - Alerts arrive as <channel> events. When you see one, act on it as the user requested.
-
-4. MANAGE:
-   - list_connections — see all active connections
-   - list_watchers — see all watchers (optionally filter by connectionId)
-   - get_watcher — get details of a specific watcher by ID (no connectionId needed)
-   - get_watcher_logs — see MATCH/SUPPRESSED/ERROR events for a watcher
-   - update_watcher — change conditions, cooldown, or action
-   - delete_watcher — stop and remove a watcher (just needs watcher ID)
-   - destroy_connection — remove a connection and its stream
-
-CHANNEL EVENTS:
-- <channel source="livetap" type="alert"> = a watcher condition matched. Read the payload and act on it.
-  The payload contains: watcherId, expression, matched_values, and the full stream entry.
-
-When the user asks to "monitor", "watch", or "alert on" something:
-1. First check list_connections — reuse an existing connection if possible
-2. If no connection exists, create one
-3. Sample the stream with read_stream to understand the data shape
-4. Create a watcher with the correct field paths from the sample
-5. Tell the user what you set up and what will trigger it
-
-TIPS:
-- Watcher IDs (w_xxx) are globally unique. You don't need the connectionId to get, update, or delete a watcher.
-- Common MQTT brokers: broker.emqx.io (public demo), test.mosquitto.org (public test).
-- Webhook connections return an ingest URL — give this to the user or to an external service.
-- If a field path doesn't exist in the payload, the condition evaluates to false (no crash, no error).
-`.trim()
+const INSTRUCTIONS = generateInstructions()
 
 async function waitForDaemon(maxWaitMs = 10_000): Promise<boolean> {
   const deadline = Date.now() + maxWaitMs

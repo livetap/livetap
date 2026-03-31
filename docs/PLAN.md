@@ -1259,22 +1259,246 @@ function createWsServer(opts: WsServerOptions = {}) {
 
 ### Phase 7: Launch prep
 
-**Goal:** README, demo recording, HN post, npm publish.
+**Goal:** Everything a stranger needs to go from "what is this?" to "wow, live data in my Claude Code session" in under 2 minutes. README, demo, HN post, npm publish, GitHub polish.
 
-**Build:**
-- Update README.md with final install/usage instructions
-- Record terminal demo (asciinema or screen recording): install → connect → sample → set watcher → alert fires
-- Draft HN Show HN post
-- `npm publish` as `@livetap`
-- GitHub repo settings: description, topics, license
+**No new code.** This phase is docs, marketing, and release engineering.
 
-**Checklist:**
-- [ ] All `bun test` pass (phases 1-6)
-- [ ] README has quick start that works from scratch
-- [ ] npm package installs cleanly
-- [ ] Demo recording shows full user story
-- [ ] HN post drafted
-- [ ] GitHub repo public with MIT license
+---
+
+**README.md** — complete rewrite from current stub:
+
+Structure:
+```
+# livetap
+> Push live data streams into your AI coding agent.
+
+## Demo (GIF or asciinema embed)
+
+## Quick start (30 seconds)
+  bun add @livetap
+  # restart Claude Code with channels
+  # "hey Claude, connect to mqtt://broker.emqx.io:1883/sensors/#"
+
+## What it does (2 paragraphs + diagram)
+
+## Supported sources
+  - MQTT
+  - WebSocket
+  - Webhooks
+  - Kafka (coming in v0.2)
+
+## How it works (architecture diagram — text art, not an image)
+
+## CLI reference (generated from command catalog)
+
+## MCP tools (generated from command catalog)
+
+## Agent instructions
+  How your AI agent uses livetap — the workflow it follows
+
+## Examples
+  - IoT sensor monitoring
+  - Crypto price alerts
+  - CI/CD webhook watcher
+  - Custom WebSocket feed
+
+## Configuration
+  - ~/.livetap/ directory
+  - .mcp.json setup
+  - Environment variables (LIVETAP_PORT, etc.)
+
+## Cloud upgrade → JustinX
+  One paragraph + link. Not salesy.
+
+## Contributing
+
+## License — MIT
+```
+
+Key principles:
+- **GIF/demo first** — before any text. Show don't tell.
+- **30-second quick start** — 3 commands max to see live data in Claude Code
+- **CLI and MCP docs auto-generated** from command catalog (Phase 4 shared foundation) — run `bun scripts/generate-docs.ts` to update README sections. Never hand-edit these sections.
+- **Examples are real** — each one should be copy-pasteable and work
+
+**`scripts/generate-docs.ts`** — reads command catalog, generates:
+- CLI reference section (markdown table from `COMMAND_CATALOG.daemon` + `COMMAND_CATALOG.tools`)
+- MCP tools section (from tool schemas)
+- Writes to tagged sections in README.md between `<!-- BEGIN:CLI -->` and `<!-- END:CLI -->` markers
+
+---
+
+**Demo recording** — terminal screencast showing the full user story:
+
+Script (target: 90 seconds):
+```
+1. [0:00]  Title card: "livetap — live data in your AI agent"
+2. [0:05]  Terminal: bun add @livetap (show postinstall output)
+3. [0:15]  Terminal: claude --dangerously-load-development-channels server:livetap
+4. [0:20]  Claude Code: "Connect to the IoT demo at mqtt://broker.emqx.io:1883/justinx/demo/#"
+5. [0:30]  Claude: calls create_connection, shows "Connected: conn_xxx"
+6. [0:35]  Claude: "Sample the stream for me"
+7. [0:40]  Claude: calls read_stream, shows sensor data (temp, humidity, air quality)
+8. [0:50]  Claude: "Watch zone-a for temperature above 25°C and log alerts to alerts.txt"
+9. [0:55]  Claude: calls create_watcher, shows "Watcher created: w_xxx"
+10. [1:05] Channel alert arrives: ← livetap: temperature=25.4°C > 25°C
+11. [1:10] Claude: reads alert, appends summary line to alerts.txt
+12. [1:15] Claude: "Alert logged. sensor-zone-a hit 25.4°C at 10:05:08Z"
+13. [1:20] Show alerts.txt with the line
+14. [1:25] End card: "npm install @livetap — github.com/livetap/livetap"
+```
+
+Recording tool: [asciinema](https://asciinema.org/) for terminal embed, or screen recording for GIF.
+- Asciinema: embed in README with `[![asciicast](https://asciinema.org/a/xxx.svg)](https://asciinema.org/a/xxx)`
+- GIF: for GitHub README preview (people scroll past SVGs). Keep under 5MB. Use [vhs](https://github.com/charmbracelet/vhs) or `agg` to convert asciinema to GIF.
+
+---
+
+**HN Show HN post:**
+
+Title:
+> Show HN: livetap – Push live MQTT/WebSocket/webhook streams into Claude Code
+
+Post body (must be concise — HN readers skim):
+```
+livetap pushes live data streams into your AI coding agent's session.
+
+Connect an MQTT broker, WebSocket feed, or webhook endpoint.
+Your agent samples the data, sets up expression-based watchers,
+and acts on alerts — all through natural language.
+
+  bun add @livetap
+  claude --dangerously-load-development-channels server:livetap
+  "Connect to mqtt://broker.emqx.io:1883/sensors/#"
+
+How it works:
+- livetap daemon manages connections + embedded Redis
+- Thin MCP channel proxy pushes events into Claude Code
+- Agent creates watchers like "alert when temp > 50"
+- When conditions match, alert arrives as a <channel> tag
+- Agent acts: logs to file, calls APIs, whatever tools it has
+
+Built with Bun. MIT licensed. No cloud required.
+
+Demo: [link to asciinema or GIF]
+GitHub: https://github.com/livetap/livetap
+npm: https://www.npmjs.com/package/@livetap
+
+We built this because existing streaming tools (Grafana, Datadog)
+aren't accessible from AI coding agents. livetap bridges that gap
+using Claude Code's Channels research preview.
+
+Supported sources: MQTT, WebSocket, Webhooks. Kafka coming next.
+
+Happy to answer questions about the architecture, Channels API,
+or the expression watcher design.
+```
+
+**HN timing:** Post Tuesday-Thursday, 8-10am EST (peak HN traffic). Avoid Mondays (busy) and Fridays (low engagement).
+
+---
+
+**npm publish:**
+
+```bash
+# Pre-publish checks (automated via scripts/prepublish.ts):
+bun test                           # All phases pass
+bun scripts/generate-docs.ts       # README sections up to date
+npm pack --dry-run                 # Verify file list
+
+# Publish:
+npm publish --access public        # @livetap is a scoped package, needs --access public
+
+# Verify:
+mkdir /tmp/verify && cd /tmp/verify
+bun init -y && bun add @livetap
+cat .mcp.json                      # should have livetap entry
+bunx @livetap --help               # should print help
+rm -rf /tmp/verify
+```
+
+**npm README:** npm shows the README from the package. Since we auto-generate CLI/MCP sections, run `generate-docs.ts` before every publish.
+
+**Version strategy:**
+- `0.1.0` — launch (phases 1-7)
+- `0.1.x` — patch fixes from user feedback
+- `0.2.0` — Kafka support, config persistence (v0.1 roadmap items)
+- `1.0.0` — stable API, Codex support, after community validation
+
+---
+
+**GitHub repo polish:**
+
+- **Description:** "Push live data streams into your AI coding agent"
+- **Topics:** `mqtt`, `kafka`, `websocket`, `mcp`, `claude-code`, `streaming`, `real-time`, `ai-agent`
+- **Website:** link to npm package or a landing page
+- **License:** MIT (add LICENSE file)
+- **Branch protection:** `main` requires PR, `v0` is development branch
+- **Issue templates:**
+  - Bug report (connection type, OS, Bun version, steps to reproduce)
+  - Feature request (protocol, use case)
+- **CONTRIBUTING.md:**
+  ```
+  # Contributing to livetap
+
+  ## Setup
+  git clone https://github.com/livetap/livetap && cd livetap
+  git checkout v0
+  bun install
+  bun test
+
+  ## Architecture
+  See docs/PLAN.md for the full build plan and phase breakdown.
+
+  ## Adding a new protocol
+  1. Add connection config type to src/server/types.ts
+  2. Create subscriber in src/server/connections/
+  3. Add to command catalog in src/shared/command-catalog.ts
+  4. Add tests in tests/
+
+  ## Running tests
+  bun test                    # all tests
+  bun test tests/phase1/      # specific phase
+  SKIP_LIVE_MQTT=1 bun test   # skip tests requiring broker.emqx.io
+  ```
+
+---
+
+**Launch day checklist:**
+
+Pre-launch (day before):
+- [ ] All `bun test` pass (phases 1-6, ~60 tests)
+- [ ] `npm pack` → clean install in fresh dir → full flow works
+- [ ] README has working quick start (tested from scratch)
+- [ ] Demo GIF/asciinema recorded and embedded in README
+- [ ] HN post drafted and reviewed
+- [ ] CONTRIBUTING.md written
+- [ ] LICENSE file added (MIT)
+- [ ] GitHub repo topics and description set
+- [ ] Issue templates added
+
+Launch (morning, Tue-Thu 8-10am EST):
+- [ ] `npm publish --access public`
+- [ ] Verify: `bun add @livetap` works from fresh project
+- [ ] Merge `v0` → `main` (or keep as default branch)
+- [ ] Make GitHub repo public (if not already)
+- [ ] Post to HN
+- [ ] Post to relevant subreddits: r/programming, r/IoT, r/homeautomation, r/ClaudeAI
+- [ ] Tweet/X post with demo GIF
+
+Post-launch (first 48 hours):
+- [ ] Monitor HN comments — respond to technical questions
+- [ ] Monitor GitHub issues — fast response to install/setup problems
+- [ ] Fix any "it doesn't work on my machine" issues immediately
+- [ ] Track npm download count
+- [ ] Note feature requests for v0.2 roadmap
+
+---
+
+**Done gate:**
+- All items in launch day checklist completed
+- npm package live and installable
+- At least one person outside the team has completed the full flow (install → connect → sample → watch → alert)
 
 ---
 

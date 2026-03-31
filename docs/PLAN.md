@@ -1739,6 +1739,10 @@ SKIP_LIVE_MQTT=1 bun test      # Skip tests that need broker.emqx.io
 | 6 | 3 | 2 | ~5 |
 | **Total** | **24** | **16** | **~40** |
 
+## Minor Improvements (pre-launch polish)
+- Watcher SUPPRESSED log noise: only log the first suppression after a match, not every entry during cooldown. Currently floods the log file when a high-frequency stream matches often.
+- `redis-server` npm package doesn't bundle the binary — requires `brew install redis` or system redis-server on PATH. Document as prerequisite or find a package that bundles it.
+
 ## v0.1 Additions
 - JSON config file persistence (livetap.json)
 - `livetap export` / `livetap import`

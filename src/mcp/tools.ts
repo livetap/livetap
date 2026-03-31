@@ -80,12 +80,12 @@ export const TOOLS = [
         connectionId: { type: 'string', description: 'The connection ID to watch' },
         conditions: {
           type: 'array',
-          description: 'Array of conditions: [{field: "dot.path", op: ">", value: 50}]. Supported ops: >, <, >=, <=, ==, !=, contains',
+          description: 'Array of conditions: [{field: "dot.path", op: ">", value: 50}]. Supported ops: >, <, >=, <=, ==, !=, contains, matches (regex)',
           items: {
             type: 'object',
             properties: {
               field: { type: 'string', description: 'Dot-path into the JSON payload (e.g. "sensors.temperature.value")' },
-              op: { type: 'string', enum: ['>', '<', '>=', '<=', '==', '!=', 'contains'], description: 'Comparison operator' },
+              op: { type: 'string', enum: ['>', '<', '>=', '<=', '==', '!=', 'contains', 'matches'], description: 'Comparison operator. "matches" takes a regex pattern string.' },
               value: { description: 'Value to compare against (number, string, or boolean)' },
             },
             required: ['field', 'op', 'value'],

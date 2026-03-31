@@ -52,6 +52,10 @@ export class WatcherManager {
         throw new Error(`Invalid op '${c.op}'. Supported: ${VALID_OPS.join(', ')}`)
       }
       if (!c.field) throw new Error('Each condition must have a field.')
+      if (c.op === 'matches') {
+        try { new RegExp(String(c.value)) }
+        catch (err) { throw new Error(`Invalid regex '${c.value}': ${(err as Error).message}`) }
+      }
     }
 
     const id = generateId()
@@ -117,6 +121,10 @@ export class WatcherManager {
       for (const c of updates.conditions) {
         if (!VALID_OPS.includes(c.op as any)) {
           throw new Error(`Invalid op '${c.op}'. Supported: ${VALID_OPS.join(', ')}`)
+        }
+        if (c.op === 'matches') {
+          try { new RegExp(String(c.value)) }
+          catch (err) { throw new Error(`Invalid regex '${c.value}': ${(err as Error).message}`) }
         }
       }
       info.conditions = updates.conditions

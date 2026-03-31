@@ -29,6 +29,9 @@ export function evaluateCondition(payload: any, condition: WatcherCondition): bo
     case '==':       return value == condition.value
     case '!=':       return value != condition.value
     case 'contains': return String(value).includes(String(condition.value))
+    case 'matches':
+      try { return new RegExp(String(condition.value)).test(String(value)) }
+      catch { return false }
     default:         return false
   }
 }

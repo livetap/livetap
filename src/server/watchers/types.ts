@@ -4,7 +4,7 @@
 
 export interface WatcherCondition {
   field: string
-  op: '>' | '<' | '>=' | '<=' | '==' | '!=' | 'contains'
+  op: '>' | '<' | '>=' | '<=' | '==' | '!=' | 'contains' | 'matches'
   value: number | string | boolean
 }
 
@@ -41,4 +41,4 @@ export interface WatcherAlert {
   ts: number
 }
 
-export const VALID_OPS = ['>', '<', '>=', '<=', '==', '!=', 'contains'] as const
+export const VALID_OPS = ['>', '<', '>=', '<=', '==', '!=', 'contains', 'matches'] as const

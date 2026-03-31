@@ -63,7 +63,7 @@ test('create watcher rejects invalid op', async () => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       connectionId: connId,
-      conditions: [{ field: 'temp', op: 'matches', value: 40 }],
+      conditions: [{ field: 'temp', op: 'LIKE', value: 40 }],
     }),
   })
   expect(res.status).toBe(400)

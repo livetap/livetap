@@ -71,6 +71,104 @@ const TOOLS = [
       required: ['connectionId'],
     },
   },
+  {
+    name: 'create_watcher',
+    description: 'Create an expression-based watcher on a connection. The watcher evaluates structured conditions against each stream entry and fires an alert when conditions match. ALWAYS use read_stream first to understand the data shape and field paths.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        connectionId: { type: 'string', description: 'The connection ID to watch' },
+        conditions: {
+          type: 'array',
+          description: 'Array of conditions: [{field: "dot.path", op: ">", value: 50}]. Supported ops: >, <, >=, <=, ==, !=, contains',
+          items: {
+            type: 'object',
+            properties: {
+              field: { type: 'string', description: 'Dot-path into the JSON payload (e.g. "sensors.temperature.value")' },
+              op: { type: 'string', enum: ['>', '<', '>=', '<=', '==', '!=', 'contains'], description: 'Comparison operator' },
+              value: { description: 'Value to compare against (number, string, or boolean)' },
+            },
+            required: ['field', 'op', 'value'],
+          },
+        },
+        match: { type: 'string', enum: ['all', 'any'], description: 'How to combine conditions: "all" (AND) or "any" (OR). Default: "all"', default: 'all' },
+        action: { description: '"channel_alert" (default), or {webhook: "url"}, or {shell: "command"}', default: 'channel_alert' },
+        cooldown: { type: 'number', description: 'Seconds between repeated alerts. 0 for every match, 60 default. Use 0 for rare events (webhooks), 30-60 for sensors, 300+ for high-frequency streams.', default: 60 },
+      },
+      required: ['connectionId', 'conditions'],
+    },
+  },
+  {
+    name: 'list_watchers',
+    description: 'List all watchers for a connection with status, match count, and last match time.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        connectionId: { type: 'string', description: 'The connection ID' },
+      },
+      required: ['connectionId'],
+    },
+  },
+  {
+    name: 'get_watcher',
+    description: 'Get details of a specific watcher including conditions, status, match count, and config.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        watcherId: { type: 'string', description: 'The watcher ID' },
+      },
+      required: ['watcherId'],
+    },
+  },
+  {
+    name: 'get_watcher_logs',
+    description: 'Get evaluation logs from a watcher — shows MATCH, SUPPRESSED, FIELD_NOT_FOUND, and CHECKPOINT events.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        watcherId: { type: 'string', description: 'The watcher ID' },
+        lines: { type: 'number', description: 'Number of log lines to return (default 50)', default: 50 },
+      },
+      required: ['watcherId'],
+    },
+  },
+  {
+    name: 'update_watcher',
+    description: "Update a watcher's conditions, match mode, action, or cooldown. The watcher restarts with the new config.",
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        watcherId: { type: 'string', description: 'The watcher ID' },
+        conditions: { type: 'array', description: 'New conditions array', items: { type: 'object' } },
+        match: { type: 'string', enum: ['all', 'any'] },
+        action: { description: 'New action' },
+        cooldown: { type: 'number', description: 'New cooldown in seconds' },
+      },
+      required: ['watcherId'],
+    },
+  },
+  {
+    name: 'delete_watcher',
+    description: 'Stop and remove a watcher.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        watcherId: { type: 'string', description: 'The watcher ID to delete' },
+      },
+      required: ['watcherId'],
+    },
+  },
+  {
+    name: 'restart_watcher',
+    description: 'Restart a stopped watcher.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        watcherId: { type: 'string', description: 'The watcher ID to restart' },
+      },
+      required: ['watcherId'],
+    },
+  },
 ]
 
 function text(content: string) {
@@ -143,6 +241,61 @@ export function registerTools(server: Server, daemonUrl: string) {
           if (args?.maxEntries) params.set('maxEntries', String(args.maxEntries))
           const res = await fetch(`${daemonUrl}/connections/${args?.connectionId}/stream?${params}`)
           if (!res.ok) return error('Connection not found')
+          return text(await res.text())
+        }
+
+        case 'create_watcher': {
+          const res = await fetch(`${daemonUrl}/watchers`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              connectionId: args?.connectionId,
+              conditions: args?.conditions,
+              match: args?.match ?? 'all',
+              action: args?.action ?? 'channel_alert',
+              cooldown: args?.cooldown ?? 60,
+            }),
+          })
+          if (!res.ok) return error(await res.text())
+          return text(await res.text())
+        }
+
+        case 'list_watchers': {
+          const res = await fetch(`${daemonUrl}/watchers?connectionId=${args?.connectionId}`)
+          return text(await res.text())
+        }
+
+        case 'get_watcher': {
+          const res = await fetch(`${daemonUrl}/watchers/${args?.watcherId}`)
+          if (!res.ok) return error('Watcher not found')
+          return text(await res.text())
+        }
+
+        case 'get_watcher_logs': {
+          const res = await fetch(`${daemonUrl}/watchers/${args?.watcherId}/logs?lines=${args?.lines ?? 50}`)
+          return text(await res.text())
+        }
+
+        case 'update_watcher': {
+          const { watcherId, ...updates } = args as any
+          const res = await fetch(`${daemonUrl}/watchers/${watcherId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates),
+          })
+          if (!res.ok) return error(await res.text())
+          return text(await res.text())
+        }
+
+        case 'delete_watcher': {
+          const res = await fetch(`${daemonUrl}/watchers/${args?.watcherId}`, { method: 'DELETE' })
+          if (!res.ok) return error('Watcher not found')
+          return text(await res.text())
+        }
+
+        case 'restart_watcher': {
+          const res = await fetch(`${daemonUrl}/watchers/${args?.watcherId}/restart`, { method: 'POST' })
+          if (!res.ok) return error('Watcher not found')
           return text(await res.text())
         }
 

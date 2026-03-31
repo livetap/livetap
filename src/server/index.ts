@@ -1,22 +1,36 @@
 /**
  * livetap daemon — HTTP API on :8788
- * Manages connections, streams, and (later) watchers.
+ * Manages connections, streams, and watchers.
  */
 
 import { startRedis, type RedisManager } from './redis.js'
 import { ConnectionManager } from './connection-manager.js'
+import { WatcherManager } from './watchers/manager.js'
+import type { WatcherAlert } from './watchers/types.js'
 import type { StreamEntry } from './types.js'
 
 const PORT = parseInt(process.env.LIVETAP_PORT || '8788')
 
 let redis: RedisManager
 let manager: ConnectionManager
+let watchers: WatcherManager
+
+// SSE clients for alert delivery
+const sseClients = new Set<(chunk: string) => void>()
+
+function broadcastSSE(alert: WatcherAlert) {
+  const data = `data: ${JSON.stringify(alert)}\n\n`
+  for (const emit of sseClients) {
+    try { emit(data) } catch { /* client gone */ }
+  }
+}
 
 async function boot() {
   redis = await startRedis()
   console.error(`[livetap] Redis started on port ${redis.port}`)
 
   manager = new ConnectionManager(redis.client, redis.url)
+  watchers = new WatcherManager(redis.client, redis.url, broadcastSSE)
 
   Bun.serve({
     port: PORT,
@@ -24,6 +38,22 @@ async function boot() {
     async fetch(req) {
       const url = new URL(req.url)
       const method = req.method
+
+      // --- SSE events stream ---
+      if (method === 'GET' && url.pathname === '/events') {
+        const stream = new ReadableStream({
+          start(ctrl) {
+            const encoder = new TextEncoder()
+            ctrl.enqueue(encoder.encode(': connected\n\n'))
+            const emit = (chunk: string) => ctrl.enqueue(encoder.encode(chunk))
+            sseClients.add(emit)
+            req.signal.addEventListener('abort', () => sseClients.delete(emit))
+          },
+        })
+        return new Response(stream, {
+          headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+        })
+      }
 
       // --- Health ---
       if (method === 'GET' && url.pathname === '/status') {
@@ -105,6 +135,86 @@ async function boot() {
         }
       }
 
+      // --- Create watcher ---
+      if (method === 'POST' && url.pathname === '/watchers') {
+        try {
+          const body = await req.json()
+          const connId = body.connectionId
+          const record = manager.get(connId)
+          if (!record) return json({ error: 'Connection not found' }, 404)
+
+          const info = await watchers.create(
+            connId,
+            record.streamKey,
+            body.conditions,
+            body.match ?? 'all',
+            body.action ?? 'channel_alert',
+            body.cooldown ?? 60,
+          )
+          return json({ id: info.id, status: info.status, expression: `${info.conditions.map(c => `${c.field} ${c.op} ${c.value}`).join(info.match === 'all' ? ' AND ' : ' OR ')}` }, 201)
+        } catch (err) {
+          return json({ error: (err as Error).message }, 400)
+        }
+      }
+
+      // --- List watchers ---
+      if (method === 'GET' && url.pathname === '/watchers') {
+        const connId = url.searchParams.get('connectionId')
+        if (!connId) return json({ error: 'connectionId query param required' }, 400)
+        return json(await watchers.list(connId))
+      }
+
+      // --- Watcher routes: /watchers/:id ---
+      const watcherMatch = url.pathname.match(/^\/watchers\/([^/]+)$/)
+      if (watcherMatch) {
+        const id = watcherMatch[1]
+        if (method === 'GET') {
+          const info = await watchers.get(id)
+          if (!info) return json({ error: 'Watcher not found' }, 404)
+          return json(info)
+        }
+        if (method === 'PUT') {
+          const body = await req.json()
+          const info = await watchers.get(id)
+          if (!info) return json({ error: 'Watcher not found' }, 404)
+          const record = manager.get(info.connectionId)
+          if (!record) return json({ error: 'Connection not found' }, 404)
+          try {
+            const updated = await watchers.update(id, record.streamKey, body)
+            return json(updated)
+          } catch (err) {
+            return json({ error: (err as Error).message }, 400)
+          }
+        }
+        if (method === 'DELETE') {
+          const ok = await watchers.delete(id)
+          if (!ok) return json({ error: 'Watcher not found' }, 404)
+          return json({ deleted: id })
+        }
+      }
+
+      // --- Watcher logs: /watchers/:id/logs ---
+      const logsMatch = url.pathname.match(/^\/watchers\/([^/]+)\/logs$/)
+      if (logsMatch && method === 'GET') {
+        const id = logsMatch[1]
+        const lines = parseInt(url.searchParams.get('lines') ?? '50')
+        const logs = await watchers.getLogs(id, lines)
+        return json({ id, logs })
+      }
+
+      // --- Restart watcher: /watchers/:id/restart ---
+      const restartMatch = url.pathname.match(/^\/watchers\/([^/]+)\/restart$/)
+      if (restartMatch && method === 'POST') {
+        const id = restartMatch[1]
+        const info = await watchers.get(id)
+        if (!info) return json({ error: 'Watcher not found' }, 404)
+        const record = manager.get(info.connectionId)
+        if (!record) return json({ error: 'Connection not found' }, 404)
+        const ok = await watchers.restart(id, record.streamKey)
+        if (!ok) return json({ error: 'Watcher not found' }, 404)
+        return json({ restarted: id })
+      }
+
       return json({ error: 'Not found' }, 404)
     },
   })
@@ -132,18 +242,15 @@ function json(data: unknown, status = 200) {
 }
 
 // Graceful shutdown
-process.on('SIGTERM', async () => {
+async function shutdown() {
   console.error('[livetap] shutting down...')
+  await watchers.stopAll()
   await manager.destroyAll()
   await redis.stop()
   process.exit(0)
-})
+}
 
-process.on('SIGINT', async () => {
-  console.error('[livetap] shutting down...')
-  await manager.destroyAll()
-  await redis.stop()
-  process.exit(0)
-})
+process.on('SIGTERM', shutdown)
+process.on('SIGINT', shutdown)
 
 boot()

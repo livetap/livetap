@@ -1,19 +1,43 @@
 {
   "name": "livetap",
+  "version": "0.1.0",
+  "description": "Push live data streams into your AI coding agent. Connect MQTT, WebSocket, or webhooks.",
   "type": "module",
   "bin": {
     "livetap": "./bin/livetap.ts"
+  },
+  "scripts": {
+    "postinstall": "bun ./scripts/postinstall.ts",
+    "test": "bun test"
+  },
+  "keywords": [
+    "mqtt", "kafka", "websocket", "webhook", "streaming",
+    "real-time", "monitoring", "alerts", "mcp", "claude-code",
+    "ai-agent", "iot", "observability", "data-pipeline"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/livetap/livetap"
+  },
+  "homepage": "https://github.com/livetap/livetap",
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/postinstall.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "ioredis": "^5.10.1",
+    "mqtt": "^5.15.1",
+    "redis-server": "^1.2.2"
   },
   "devDependencies": {
     "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.28.0",
-    "ioredis": "^5.10.1",
-    "mqtt": "^5.15.1",
-    "redis-server": "^1.2.2"
   }
 }

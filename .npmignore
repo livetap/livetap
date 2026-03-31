@@ -1,0 +1,10 @@
+.local/
+.cursor/
+.mcp.json
+tests/
+docs/
+scripts/livetap-channel.ts
+scripts/mqtt-bridge.ts
+dump.rdb
+alerts.txt
+*.test.ts

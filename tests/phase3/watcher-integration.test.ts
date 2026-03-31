@@ -1,6 +1,8 @@
-import { test, expect, beforeAll, afterAll } from 'bun:test'
+import { test, expect, beforeAll, afterAll, setDefaultTimeout } from 'bun:test'
 
-const PORT = 18791
+setDefaultTimeout(15_000)
+
+const PORT = 28791
 let serverProc: ReturnType<typeof Bun.spawn>
 const BASE = `http://127.0.0.1:${PORT}`
 

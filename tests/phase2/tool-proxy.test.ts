@@ -5,7 +5,7 @@ import { test, expect, beforeAll, afterAll } from 'bun:test'
  * through the HTTP API (same endpoints the MCP proxy hits).
  */
 
-const PORT = 18790
+const PORT = 28790
 let serverProc: ReturnType<typeof Bun.spawn>
 
 beforeAll(async () => {

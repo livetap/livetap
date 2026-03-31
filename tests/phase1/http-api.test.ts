@@ -1,6 +1,6 @@
 import { test, expect, beforeAll, afterAll } from 'bun:test'
 
-const PORT = 18789
+const PORT = 28789
 let serverProc: ReturnType<typeof Bun.spawn>
 
 beforeAll(async () => {

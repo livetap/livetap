@@ -1,6 +1,6 @@
 import { test, expect, beforeAll, afterAll } from 'bun:test'
 
-const PORT = 18792
+const PORT = 28792
 let serverProc: ReturnType<typeof Bun.spawn>
 
 function cli(...args: string[]): Promise<string> {

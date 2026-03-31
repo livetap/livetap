@@ -5,7 +5,7 @@ import { createWebhookSender } from '../fixtures/webhook-sender.js'
 
 let redis: RedisManager
 let manager: ConnectionManager
-const PORT = 18788
+const PORT = 28788
 
 let server: ReturnType<typeof Bun.serve>
 

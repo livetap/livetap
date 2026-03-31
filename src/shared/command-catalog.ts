@@ -49,9 +49,9 @@ export const CLI_COMMANDS: CatalogCommand[] = [
   {
     name: 'tap',
     usage: 'livetap tap <uri|file.json>',
-    description: 'Tap into a data source (MQTT, WebSocket, or webhook)',
+    description: 'Tap into a data source (MQTT, WebSocket, file, or webhook)',
     args: [
-      { position: 0, name: 'source', required: true, description: 'URI (mqtt://..., wss://...), "webhook", or a .json config file' },
+      { position: 0, name: 'source', required: true, description: 'URI (mqtt://..., wss://..., file:///path), "webhook", or a .json config file' },
     ],
     flags: [
       { name: '--name', type: 'string', description: 'Display name for the connection' },
@@ -59,6 +59,7 @@ export const CLI_COMMANDS: CatalogCommand[] = [
     examples: [
       'livetap tap mqtt://broker.emqx.io:1883/sensors/#',
       'livetap tap wss://stream.example.com/prices',
+      'livetap tap file:///var/log/nginx/error.log',
       'livetap tap webhook',
       'livetap tap connection.json',
     ],

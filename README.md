@@ -2,7 +2,7 @@
 
 Push live data streams into your AI coding agent.
 
-Connect MQTT, WebSocket, or webhook sources. Your agent samples, watches, and acts on real-time data through natural language.
+Connect MQTT brokers, WebSocket feeds, or tail log files. Your agent samples, watches, and acts on real-time data through natural language.
 
 ## Quick start
 
@@ -98,7 +98,7 @@ Watchers use structured conditions, not arbitrary code:
 }
 ```
 
-Supported operators: `>`, `<`, `>=`, `<=`, `==`, `!=`, `contains`
+Supported operators: `>`, `<`, `>=`, `<=`, `==`, `!=`, `contains`, `matches` (regex)
 
 When a watcher fires, the alert arrives as a `<channel>` tag in your Claude Code session. The agent reads it and acts — logging to a file, calling an API, or whatever you asked for.
 
@@ -108,7 +108,8 @@ When a watcher fires, the alert arrives as a `<channel>` tag in your Claude Code
 |----------|--------|---------|
 | MQTT | Working | `livetap tap mqtt://broker.emqx.io:1883/sensors/#` |
 | WebSocket | Working | `livetap tap wss://stream.example.com/prices` |
-| Webhooks | Working | `livetap tap webhook` |
+| File tailing | Working | `livetap tap file:///var/log/nginx/error.log` |
+| Webhooks | Planned (v0.1) | — |
 | Kafka | Planned (v0.2) | — |
 
 ## Development

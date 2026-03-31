@@ -14,7 +14,7 @@ test('instructions contain workflow steps', () => {
 test('instructions mention all connection types', () => {
   expect(instructions).toContain('mqtt')
   expect(instructions).toContain('websocket')
-  expect(instructions).toContain('webhook')
+  expect(instructions).toContain('file')
 })
 
 test('instructions mention key tools', () => {

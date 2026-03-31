@@ -67,7 +67,7 @@ function parseExpression(expr: string): { conditions: any[]; match: 'all' | 'any
 
   const conditions = parts.map((part) => {
     // Match: field op value
-    const m = part.match(/^(.+?)\s*(>=|<=|!=|>|<|==|contains)\s*(.+)$/)
+    const m = part.match(/^(.+?)\s*(>=|<=|!=|>|<|==|contains|matches)\s*(.+)$/)
     if (!m) {
       console.error(`Cannot parse condition: "${part}"`)
       console.error('Expected format: "field op value" (e.g. "temperature > 50")')

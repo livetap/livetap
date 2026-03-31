@@ -35,24 +35,57 @@ export async function run(args: string[]) {
 
   // Filter args: anything that doesn't start with - and isn't after a flag
   const positional = args.filter((a) => !a.startsWith('-'))
-  const connId = positional[0]
+  const arg = positional[0]
+
+  // If it looks like a watcher ID, show that watcher's details
+  if (arg?.startsWith('w_')) {
+    const info = await daemonJson(`/watchers/${arg}`)
+    if (info.error) {
+      console.error(`Error: ${info.error}`)
+      return
+    }
+    if (jsonMode) {
+      console.log(JSON.stringify(info, null, 2))
+    } else {
+      const expr = info.conditions
+        ?.map((c: any) => `${c.field} ${c.op} ${c.value}`)
+        .join(info.match === 'all' ? ' AND ' : ' OR ') || '?'
+      console.log(`Watcher ${info.id}:`)
+      console.log(`  Connection: ${info.connectionId}`)
+      console.log(`  Expression: ${expr}`)
+      console.log(`  Status: ${info.status}  Matches: ${info.matchCount ?? 0}  Cooldown: ${info.cooldown}s`)
+      if (info.lastMatch) console.log(`  Last match: ${info.lastMatch}`)
+      console.log(`  Created: ${info.createdAt}`)
+    }
+    return
+  }
+
+  const connId = arg
 
   const params = connId ? `?connectionId=${connId}` : ''
   const data = await daemonJson(`/watchers${params}`)
 
-  if (jsonMode) {
-    console.log(JSON.stringify(data, null, 2))
+  // Handle error response (e.g. old daemon that requires connectionId)
+  if (data.error) {
+    console.error(`Error: ${data.error}`)
     return
   }
 
-  if (data.length === 0) {
+  const list = Array.isArray(data) ? data : []
+
+  if (jsonMode) {
+    console.log(JSON.stringify(list, null, 2))
+    return
+  }
+
+  if (list.length === 0) {
     console.log(connId ? `No watchers for ${connId}.` : 'No watchers.')
     return
   }
 
   // Group by connectionId for display
   const grouped = new Map<string, any[]>()
-  for (const w of data) {
+  for (const w of list) {
     const key = w.connectionId
     if (!grouped.has(key)) grouped.set(key, [])
     grouped.get(key)!.push(w)

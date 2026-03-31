@@ -99,7 +99,7 @@ async function main() {
   }
 
   const mcp = new Server(
-    { name: 'livetap', version: '0.1.0' },
+    { name: 'LiveTap', version: '0.1.4' },
     {
       capabilities: {
         experimental: { 'claude/channel': {} },

@@ -26,7 +26,7 @@ test('instructions mention key tools', () => {
 
 test('instructions explain channel events', () => {
   expect(instructions).toContain('CHANNEL EVENTS')
-  expect(instructions).toContain('<channel source="livetap"')
+  expect(instructions).toContain('<channel source="LiveTap"')
 })
 
 test('instructions tell agent to sample before watching', () => {

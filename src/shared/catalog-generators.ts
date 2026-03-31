@@ -10,7 +10,7 @@ import { TOOLS } from '../mcp/tools.js'
  */
 export function generateHelpText(): string {
   const lines: string[] = [
-    'livetap — Push live data streams into your AI coding agent',
+    'LiveTap — Push live data streams into your AI coding agent',
     '',
     'Usage:',
   ]
@@ -50,7 +50,7 @@ export function generateHelpText(): string {
  */
 export function generateLlmHelp(): object {
   return {
-    name: 'livetap',
+    name: 'LiveTap',
     version: '0.1.4',
     description: 'Push live data streams into your AI coding agent',
     setup: {
@@ -83,7 +83,7 @@ export function generateInstructions(): string {
   const watcherTools = toolNames.filter((n) => n.includes('watcher') || n.includes('watch'))
 
   return `
-You have access to livetap, a live data streaming tool. Use it to connect to data sources, sample streams, and set up expression-based watchers that alert you when conditions match.
+You have access to LiveTap, a live data streaming tool. Use it to connect to data sources, sample streams, and set up expression-based watchers that alert you when conditions match.
 
 WORKFLOW:
 1. CONNECT: Use create_connection to tap into a data source.
@@ -110,7 +110,7 @@ WORKFLOW:
    - Watcher IDs (w_xxx) are globally unique. No connectionId needed for get/update/delete.
 
 CHANNEL EVENTS:
-- <channel source="livetap" type="alert"> = a watcher condition matched. Read the payload and act on it.
+- <channel source="LiveTap" type="alert"> = a watcher condition matched. Read the payload and act on it.
   The payload contains: watcherId, expression, matched_values, and the full stream entry.
 
 When the user asks to "monitor", "watch", or "alert on" something:

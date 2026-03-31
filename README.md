@@ -1,4 +1,4 @@
-# livetap
+# LiveTap
 
 > Push live data streams into your AI coding agent.
 

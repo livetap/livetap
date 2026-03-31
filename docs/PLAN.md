@@ -1011,32 +1011,249 @@ tests/phase5/
 
 ---
 
-### Phase 6: WebSocket source protocol
+### Phase 6: WebSocket source protocol — hardening
 
-**Goal:** `create_connection({ type: 'websocket', url: 'wss://...' })` connects to a remote WebSocket, each message → Redis stream.
+**Goal:** Production-ready WebSocket source subscriber. Phase 1 scaffolds the basic WS client; this phase adds reconnection, auth headers, binary frame handling, connection state tracking, and tests against real-world WS patterns (financial feeds, streaming APIs).
+
+**Why a separate phase:**
+WebSocket sources have failure modes that MQTT and webhooks don't:
+- Servers drop connections silently (no close frame)
+- Auth via headers or initial handshake message (not URL params)
+- Binary frames (protobuf, msgpack) alongside JSON
+- Rate limiting / backpressure from the server
+- Ping/pong keepalive requirements
 
 **Build:**
-- Already scaffolded in Phase 1 (`src/server/connections/websocket.ts`)
-- Add WS-specific connection config: `url`, `headers`, `reconnect` options
-- Handle reconnection with exponential backoff
-- Parse incoming messages: if JSON → store parsed; if text → store as `{payload: text}`
+
+**WebSocket connection config** — extends `src/server/types.ts`:
+```typescript
+interface WebSocketConnectionConfig {
+  type: 'websocket';
+  url: string;                      // "wss://stream.example.com/prices"
+  headers?: Record<string, string>; // Auth headers: { "Authorization": "Bearer ..." }
+  handshake?: string;               // Initial message to send after connect (e.g. subscription JSON)
+  reconnect?: {
+    enabled: boolean;               // default true
+    maxRetries: number;             // default Infinity (keep trying)
+    initialDelayMs: number;         // default 1000
+    maxDelayMs: number;             // default 30000
+  };
+  pingIntervalMs?: number;          // Send ping frames every N ms (default 30000, 0 to disable)
+  binaryFormat?: 'json' | 'text' | 'base64';  // How to store binary frames (default: 'base64')
+}
+```
+
+**WebSocket subscriber** — `src/server/connections/websocket.ts` (hardened):
+
+```typescript
+class WebSocketSubscriber implements Subscriber {
+  private ws: WebSocket | null = null
+  private retryCount = 0
+  private retryTimer: Timer | null = null
+  private pingTimer: Timer | null = null
+  private status: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error' = 'disconnected'
+
+  async start() {
+    this.connect()
+  }
+
+  private connect() {
+    this.status = this.retryCount === 0 ? 'connecting' : 'reconnecting'
+
+    this.ws = new WebSocket(this.config.url, {
+      headers: this.config.headers,
+    })
+
+    this.ws.onopen = () => {
+      this.status = 'connected'
+      this.retryCount = 0
+
+      // Send handshake message if configured (e.g. subscription request)
+      if (this.config.handshake) {
+        this.ws!.send(this.config.handshake)
+      }
+
+      // Start ping keepalive
+      if (this.config.pingIntervalMs) {
+        this.pingTimer = setInterval(() => {
+          if (this.ws?.readyState === WebSocket.OPEN) {
+            this.ws.ping()
+          }
+        }, this.config.pingIntervalMs)
+      }
+    }
+
+    this.ws.onmessage = async (event) => {
+      const fields = this.parseMessage(event.data)
+      await this.redis.xadd(this.streamKey, '*', ...Object.entries(fields).flat())
+      // XTRIM retention
+      const minId = Date.now() - this.retentionMs
+      await this.redis.xtrim(this.streamKey, 'MINID', '~', minId.toString())
+    }
+
+    this.ws.onclose = (event) => {
+      this.cleanup()
+      if (this.config.reconnect?.enabled !== false) {
+        this.scheduleReconnect()
+      } else {
+        this.status = 'disconnected'
+      }
+    }
+
+    this.ws.onerror = (event) => {
+      // onerror is always followed by onclose, so reconnect logic lives there
+      this.status = 'error'
+    }
+  }
+
+  private parseMessage(data: string | Buffer | ArrayBuffer): Record<string, string> {
+    if (typeof data === 'string') {
+      // Try JSON parse
+      try {
+        const parsed = JSON.parse(data)
+        return { payload: JSON.stringify(parsed), format: 'json' }
+      } catch {
+        return { payload: data, format: 'text' }
+      }
+    }
+    // Binary frame
+    const buf = data instanceof ArrayBuffer ? Buffer.from(data) : data
+    switch (this.config.binaryFormat) {
+      case 'json':
+        try { return { payload: JSON.parse(buf.toString()), format: 'json' } }
+        catch { return { payload: buf.toString('base64'), format: 'base64' } }
+      case 'text':
+        return { payload: buf.toString('utf-8'), format: 'text' }
+      default:
+        return { payload: buf.toString('base64'), format: 'base64' }
+    }
+  }
+
+  private scheduleReconnect() {
+    const maxRetries = this.config.reconnect?.maxRetries ?? Infinity
+    if (this.retryCount >= maxRetries) {
+      this.status = 'error'
+      return
+    }
+
+    // Exponential backoff with jitter
+    const base = this.config.reconnect?.initialDelayMs ?? 1000
+    const max = this.config.reconnect?.maxDelayMs ?? 30000
+    const delay = Math.min(base * Math.pow(2, this.retryCount), max)
+    const jitter = delay * 0.2 * Math.random()  // ±20% jitter
+
+    this.retryCount++
+    this.status = 'reconnecting'
+    this.retryTimer = setTimeout(() => this.connect(), delay + jitter)
+  }
+
+  private cleanup() {
+    if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null }
+  }
+
+  async stop() {
+    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = null }
+    this.cleanup()
+    if (this.ws) { this.ws.close(); this.ws = null }
+    this.status = 'disconnected'
+  }
+
+  getStatus() {
+    return {
+      status: this.status,
+      retryCount: this.retryCount,
+      url: this.config.url,
+    }
+  }
+}
+```
+
+**Key behaviors:**
+- **Reconnect with exponential backoff + jitter** — 1s → 2s → 4s → ... → 30s cap. Jitter prevents thundering herd if many connections drop at once.
+- **Handshake message** — many WS APIs require sending a subscription message after connecting (e.g. `{"subscribe": "BTC-USD"}`). Configured via `handshake` field, sent on every (re)connect.
+- **Ping keepalive** — some servers drop idle connections. Default 30s ping interval.
+- **Binary frames** — stored as base64 by default. `binaryFormat: 'json'` attempts JSON parse first. `binaryFormat: 'text'` decodes as UTF-8.
+- **Connection state** — `connecting`, `connected`, `reconnecting`, `disconnected`, `error`. Exposed via `get_connection` tool so agent can see if a WS source is flapping.
+
+**Real-world WS patterns this handles:**
+
+| Pattern | Example | How livetap handles it |
+|---------|---------|----------------------|
+| JSON stream | Crypto price feed | Parse JSON, store in Redis as `{payload: "{...}", format: "json"}` |
+| Subscribe-on-connect | Binance WS: send `{"method":"SUBSCRIBE","params":["btcusdt@trade"]}` | `handshake` config field |
+| Auth via header | Private API: `Authorization: Bearer xxx` | `headers` config field |
+| Binary protobuf | gRPC-web, some finance feeds | Store as base64, decode later |
+| Silent drops | Server crashes, no close frame | `onclose` fires → reconnect with backoff |
+| Ping required | Server sends ping, expects pong | Bun WebSocket auto-responds to pings. livetap also sends pings proactively. |
+| Rate limit | Server sends close code 1008 | Reconnect with backoff respects the delay |
+
+**Update command catalog** — add to `src/shared/command-catalog.ts`:
+```typescript
+{
+  name: 'create_connection',
+  // ... extend examples:
+  examples: [
+    // ...existing mqtt, webhook...
+    {
+      description: 'Connect to a WebSocket stream',
+      cli: 'livetap connect wss://stream.example.com/prices',
+      tool: '{ type: "websocket", url: "wss://stream.example.com/prices" }'
+    },
+    {
+      description: 'Connect to WebSocket with auth and subscription',
+      tool: '{ type: "websocket", url: "wss://api.example.com/ws", headers: {"Authorization": "Bearer xxx"}, handshake: "{\"subscribe\": \"BTC-USD\"}" }'
+    }
+  ]
+}
+```
 
 **Tests:**
 ```
 tests/phase6/
-├── ws-connection.test.ts      # Simulated WS server → create_connection → verify entries in Redis
-├── ws-reconnect.test.ts       # WS server drops connection → verify client reconnects
-└── ws-binary.test.ts          # WS server sends binary frames → verify stored correctly
+├── ws-basic.test.ts           # Fixture WS server sends JSON → create_connection → verify entries in Redis with format=json
+├── ws-text.test.ts            # Fixture WS server sends plain text → verify stored with format=text
+├── ws-binary.test.ts          # Fixture WS server sends Buffer → verify stored as base64
+├── ws-binary-json.test.ts     # binaryFormat='json' + fixture sends JSON as Buffer → verify parsed as JSON
+├── ws-reconnect.test.ts       # Fixture drops connection after 3 messages → verify client reconnects → new messages arrive
+├── ws-reconnect-backoff.test.ts # Fixture rejects 3 connections then accepts → verify delays increase (1s, 2s, 4s)
+├── ws-reconnect-max.test.ts   # maxRetries=2, fixture always drops → verify status becomes 'error' after 2 retries
+├── ws-handshake.test.ts       # Fixture expects subscription message on connect → verify handshake sent → messages flow
+├── ws-headers.test.ts         # Fixture checks Authorization header → create_connection with headers → verify connected
+├── ws-ping.test.ts            # Fixture requires ping within 5s or drops → pingIntervalMs=2000 → verify stays connected
+├── ws-retention.test.ts       # Push many messages → verify XTRIM keeps only retention window
+└── ws-status.test.ts          # Connect → verify status='connected'. Drop → verify status='reconnecting'. Stop → 'disconnected'.
 ```
 
-**Simulated WS server** (`tests/fixtures/ws-server.ts`):
-- Bun WebSocket server on random port
-- Sends JSON sensor data every 500ms
-- Supports dropping connection on demand (for reconnect tests)
+**Simulated WS server fixture** — `tests/fixtures/ws-server.ts` (enhanced from Phase 1):
+
+```typescript
+interface WsServerOptions {
+  intervalMs?: number           // Send interval (default 500ms)
+  requireAuth?: string          // Reject if Authorization header !== this
+  requireHandshake?: string     // Wait for this message before sending data
+  dropAfter?: number            // Drop connection after N messages
+  rejectConnections?: number    // Reject first N connection attempts
+  requirePingWithinMs?: number  // Drop if no ping received within N ms
+  sendBinary?: boolean          // Send binary frames instead of text
+}
+
+function createWsServer(opts: WsServerOptions = {}) {
+  // Returns { start(): Promise<{port}>, stop(), dropConnection(), sentCount, connectionCount }
+}
+```
 
 **Done gate:**
-- `bun test tests/phase6/` passes
-- Manual: Start a public WS echo server or use a finance WS feed → create_connection → read_stream → see data
+- `bun test tests/phase6/` passes (~12 tests)
+- Manual — connect to a real public WebSocket feed:
+  ```bash
+  livetap start
+  # Binance BTC trades (public, no auth)
+  livetap connect 'wss://stream.binance.com:9443/ws/btcusdt@trade'
+  livetap sample <conn_id>
+  # Should see: {"e":"trade","s":"BTCUSDT","p":"67234.50",...}
+  livetap watch <conn_id> "p > 70000"    # alert if BTC > $70k
+  livetap stop
+  ```
 
 ---
 

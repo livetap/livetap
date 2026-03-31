@@ -1893,10 +1893,10 @@ tests/phase-file/
 ## Launch
 
 ### HN Title
-> Show HN: livetap – Push live MQTT/Kafka/webhook streams into Claude Code
+> Show HN: livetap – Push live MQTT/WebSocket/log streams into Claude Code
 
 ### npm Description
-> Push live data streams into your AI coding agent. Connect MQTT, Kafka, or webhooks. Your agent samples, watches, and acts on real-time data through natural language.
+> Push live data streams into your AI coding agent. Connect MQTT brokers, WebSocket feeds, or tail log files. Your agent samples, watches, and acts on real-time data through natural language.
 
 ### npm Keywords
-mqtt, kafka, websocket, webhook, streaming, real-time, monitoring, alerts, mcp, claude-code, ai-agent, iot, observability, data-pipeline
+mqtt, kafka, websocket, log-monitoring, streaming, real-time, monitoring, alerts, mcp, claude-code, ai-agent, iot, observability, data-pipeline, devops

@@ -1739,16 +1739,156 @@ SKIP_LIVE_MQTT=1 bun test      # Skip tests that need broker.emqx.io
 | 6 | 3 | 2 | ~5 |
 | **Total** | **24** | **16** | **~40** |
 
+## Addendum: File Tailing + Protocol Changes (post Phase 6)
+
+### Decision: Drop webhooks from v0, add file tailing
+
+**Why:** Webhooks require a public URL — localhost ingest is useless for external services (GitHub, Stripe, CI). File tailing covers the DevOps monitoring use case, which is a stronger launch story.
+
+**Protocols for v0 (revised):**
+| Protocol | Status | Use case |
+|----------|--------|----------|
+| MQTT | Shipping | IoT sensors, home automation |
+| WebSocket | Shipping | Finance (Binance, Bitstamp), real-time APIs |
+| File tailing | **New** | Log monitoring, DevOps, nginx/docker/app logs |
+| Webhooks | **Deferred to v0.1** | CI/CD, external service events |
+| Kafka | v0.2 | Analytics, event sourcing |
+
+### File Tailing Subscriber (`file://`)
+
+**URI:** `livetap tap file:///var/log/nginx/error.log`
+
+**MCP tool:** `create_connection({ type: "file", path: "/var/log/nginx/error.log" })`
+
+**Behavior:**
+- Tail from current end (new lines only, like `tail -f`). No backfill.
+- Each new line → XADD to Redis stream.
+- Auto-detect format per line: try `JSON.parse()` → if valid JSON, store with `format: json` and parsed fields; if not, store as `{ payload: "raw line", format: "text" }`.
+- Same XTRIM retention as other protocols (5 min default).
+- No line-rate throttle — XTRIM handles memory.
+
+**Config type:**
+```typescript
+interface FileConnectionConfig {
+  type: 'file'
+  path: string    // absolute path to the file
+}
+```
+
+**Security:** Only `file://` URIs accepted. No `exec://`, no shell commands, no pipes. The path must be an absolute file path. The subscriber opens the file read-only.
+
+**Log rotation:** Not handled in v0. If the file is rotated (e.g. logrotate), the subscriber keeps reading the old fd until it's deleted. User must reconnect after rotation. Document this limitation.
+
+**Implementation:** `src/server/connections/file.ts`
+- Use `Bun.file(path)` or `fs.createReadStream` with a watcher
+- Track file position (byte offset), read new bytes on fs.watch/poll, split into lines
+- Each complete line → parse + XADD
+
+**CLI:**
+```bash
+livetap tap file:///var/log/nginx/error.log
+livetap tap file:///var/log/app/structured.log    # JSON lines
+```
+
+**Example DevOps workflow:**
+```
+User: "Watch my nginx error log for 5xx errors and summarize them"
+
+Agent:
+1. create_connection({ type: "file", path: "/var/log/nginx/error.log" })
+2. read_stream → sees log lines, understands format
+3. create_watcher({ conditions: [{ field: "payload", op: "matches", value: "5[0-9]{2}" }] })
+4. Alert fires → agent reads the matching log line → summarizes
+```
+
+### Regex Operator (`matches`)
+
+**New operator added to all watcher conditions** (not just file sources):
+
+```typescript
+// Updated WatcherCondition
+interface WatcherCondition {
+  field: string
+  op: '>' | '<' | '>=' | '<=' | '==' | '!=' | 'contains' | 'matches'
+  value: number | string | boolean  // for 'matches', value is a regex string
+}
+```
+
+**Behavior:**
+- `matches` treats `value` as a regex pattern string
+- Evaluated with `new RegExp(value).test(String(fieldValue))`
+- Regex is **validated on create_watcher** — if the pattern is invalid, the tool returns an error immediately
+- Works on any string field from any source (MQTT topic, WS payload text, log lines)
+
+**Examples:**
+```json
+{ "field": "payload", "op": "matches", "value": "5[0-9]{2}" }
+{ "field": "payload", "op": "matches", "value": "ERROR|FATAL|PANIC" }
+{ "field": "topic", "op": "matches", "value": "sensor-zone-[ab]" }
+```
+
+**CLI:**
+```bash
+livetap watch conn_abc "payload matches '5[0-9]{2}'"
+livetap watch conn_abc "payload matches 'ERROR|FATAL'"
+```
+
+**Validation on create:**
+```typescript
+try {
+  new RegExp(condition.value as string)
+} catch (err) {
+  throw new Error(`Invalid regex '${condition.value}': ${err.message}`)
+}
+```
+
+### Tests to add
+
+```
+tests/phase-file/
+├── file-tail.test.ts          # Create temp file, tap it, append lines, verify in Redis
+├── file-json-lines.test.ts    # Append JSON lines → verify parsed with format=json
+├── file-text-lines.test.ts    # Append plain text → verify stored with format=text
+├── file-watcher.test.ts       # File tap + watcher with regex → verify alert fires on matching line
+└── regex-operator.test.ts     # Unit: test 'matches' operator with valid/invalid patterns, edge cases
+```
+
+### Impact on existing code
+
+| File | Change |
+|------|--------|
+| `src/server/types.ts` | Add `FileConnectionConfig` to discriminated union |
+| `src/server/connections/file.ts` | New file — file tailing subscriber |
+| `src/server/connection-manager.ts` | Add `file` case to create() |
+| `src/server/watchers/engine.ts` | Add `matches` case to evaluateCondition() |
+| `src/server/watchers/types.ts` | Add `'matches'` to VALID_OPS |
+| `src/mcp/tools.ts` | Add `path` param to create_connection, add `matches` to op enum |
+| `src/shared/command-catalog.ts` | Add `file://` examples to `tap` command |
+| `src/cli/tap.ts` | Parse `file://` URIs |
+| `README.md` | Update protocol table, add file:// to examples |
+| `docs/PLAN.md` | This addendum |
+
+### Revised HN pitch
+
+> Show HN: livetap – Push live MQTT/WebSocket/log streams into Claude Code
+
+"Log streams" replaces "webhook streams" — stronger DevOps angle.
+
+---
+
 ## Minor Improvements (pre-launch polish)
 - Watcher SUPPRESSED log noise: only log the first suppression after a match, not every entry during cooldown. Currently floods the log file when a high-frequency stream matches often.
 - `redis-server` npm package doesn't bundle the binary — requires `brew install redis` or system redis-server on PATH. Document as prerequisite or find a package that bundles it.
 
 ## v0.1 Additions
+- Webhook protocol (HTTP ingest endpoint with tunnel support)
 - JSON config file persistence (livetap.json)
 - `livetap export` / `livetap import`
 - Per-protocol smart sampling defaults
 - `livetap init` wizard
 - Kafka protocol support
+- Log rotation handling for file:// connections
+- `docker://` and `exec://` URI schemes
 
 ## Launch
 

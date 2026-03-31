@@ -1,7 +1,9 @@
 {
   "name": "livetap",
   "type": "module",
-  "private": true,
+  "bin": {
+    "livetap": "./bin/livetap.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },

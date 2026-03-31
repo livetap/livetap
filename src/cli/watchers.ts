@@ -10,31 +10,35 @@ export async function run(args: string[]) {
     return
   }
 
-  const connId = args.find((a) => !a.startsWith('-'))
   const jsonMode = args.includes('--json')
 
-  if (!connId) {
-    // List all connections first, then watchers for each
-    const conns = await daemonJson('/connections')
-    if (conns.length === 0) {
-      console.log('No active connections.')
-      return
+  // --logs <watcherId> — show watcher logs
+  const logsIdx = args.indexOf('--logs')
+  if (logsIdx !== -1) {
+    const watcherId = args[logsIdx + 1]
+    if (!watcherId) {
+      console.error('Usage: livetap watchers --logs <watcherId>')
+      process.exit(1)
     }
-
-    for (const c of conns) {
-      const watchers = await daemonJson(`/watchers?connectionId=${c.connectionId}`)
-      if (jsonMode) {
-        console.log(JSON.stringify(watchers, null, 2))
-        continue
+    const data = await daemonJson(`/watchers/${watcherId}/logs`)
+    if (jsonMode) {
+      console.log(JSON.stringify(data, null, 2))
+    } else {
+      console.log(`Logs for ${watcherId}:\n`)
+      for (const line of data.logs || []) {
+        console.log(`  ${line}`)
       }
-      if (watchers.length === 0) continue
-      console.log(`Watchers for ${c.connectionId} (${c.type} → ${c.summary?.slice(0, 30) || ''}):\n`)
-      printWatchers(watchers)
+      if (!data.logs?.length) console.log('  (no logs yet)')
     }
     return
   }
 
-  const data = await daemonJson(`/watchers?connectionId=${connId}`)
+  // Filter args: anything that doesn't start with - and isn't after a flag
+  const positional = args.filter((a) => !a.startsWith('-'))
+  const connId = positional[0]
+
+  const params = connId ? `?connectionId=${connId}` : ''
+  const data = await daemonJson(`/watchers${params}`)
 
   if (jsonMode) {
     console.log(JSON.stringify(data, null, 2))
@@ -42,12 +46,22 @@ export async function run(args: string[]) {
   }
 
   if (data.length === 0) {
-    console.log(`No watchers for ${connId}.`)
+    console.log(connId ? `No watchers for ${connId}.` : 'No watchers.')
     return
   }
 
-  console.log(`Watchers for ${connId}:\n`)
-  printWatchers(data)
+  // Group by connectionId for display
+  const grouped = new Map<string, any[]>()
+  for (const w of data) {
+    const key = w.connectionId
+    if (!grouped.has(key)) grouped.set(key, [])
+    grouped.get(key)!.push(w)
+  }
+
+  for (const [cid, ws] of grouped) {
+    console.log(`Watchers for ${cid}:\n`)
+    printWatchers(ws)
+  }
 }
 
 function printWatchers(watchers: any[]) {

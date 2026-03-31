@@ -69,8 +69,8 @@ export class WatcherManager {
       updatedAt: now,
     }
 
-    // Store in Redis
-    await this.redis.hset(`livetap:watchers:${connectionId}`, id, JSON.stringify(def))
+    // Store in flat hash (globally unique watcher IDs)
+    await this.redis.hset('livetap:watchers', id, JSON.stringify(def))
 
     const info: WatcherInfo = { ...def, matchCount: 0, entriesChecked: 0 }
     this.info.set(id, info)
@@ -81,8 +81,9 @@ export class WatcherManager {
     return info
   }
 
-  async list(connectionId: string): Promise<WatcherInfo[]> {
-    return Array.from(this.info.values()).filter((w) => w.connectionId === connectionId)
+  async list(connectionId?: string): Promise<WatcherInfo[]> {
+    const all = Array.from(this.info.values())
+    return connectionId ? all.filter((w) => w.connectionId === connectionId) : all
   }
 
   async get(watcherId: string): Promise<WatcherInfo | undefined> {
@@ -99,7 +100,7 @@ export class WatcherManager {
     }
   }
 
-  async update(watcherId: string, streamKey: string, updates: {
+  async update(watcherId: string, streamKey: string | null, updates: {
     conditions?: WatcherCondition[]
     match?: 'all' | 'any'
     action?: WatcherAction
@@ -128,7 +129,7 @@ export class WatcherManager {
 
     // Persist
     const def: WatcherDefinition = { ...info }
-    await this.redis.hset(`livetap:watchers:${info.connectionId}`, watcherId, JSON.stringify(def))
+    await this.redis.hset('livetap:watchers', watcherId, JSON.stringify(def))
 
     this.writeLog(watcherId, `UPDATED conditions=${formatExpression(info.conditions, info.match)} cooldown=${info.cooldown}s`)
     this.startLoop(watcherId, streamKey, info)
@@ -136,7 +137,7 @@ export class WatcherManager {
     return info
   }
 
-  async restart(watcherId: string, streamKey: string): Promise<boolean> {
+  async restart(watcherId: string, streamKey: string | null): Promise<boolean> {
     const info = this.info.get(watcherId)
     if (!info) return false
 
@@ -153,7 +154,7 @@ export class WatcherManager {
 
     this.stopLoop(watcherId)
     this.info.delete(watcherId)
-    await this.redis.hdel(`livetap:watchers:${info.connectionId}`, watcherId)
+    await this.redis.hdel('livetap:watchers', watcherId)
 
     // Delete log file
     try { unlinkSync(resolve(LOG_DIR, `${watcherId}.log`)) } catch { /* ok */ }

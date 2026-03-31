@@ -72,7 +72,7 @@ test('tap webhook + taps + sip + untap', async () => {
 
   // Sip
   const sipOut = await cli('sip', connId!)
-  expect(sipOut).toContain('temp=42.0')
+  expect(sipOut).toContain('"temp": 42')
 
   // Untap
   const untapOut = await cli('untap', connId!)

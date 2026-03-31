@@ -100,13 +100,12 @@ const TOOLS = [
   },
   {
     name: 'list_watchers',
-    description: 'List all watchers for a connection with status, match count, and last match time.',
+    description: 'List watchers. Optionally filter by connectionId. If omitted, lists all watchers.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        connectionId: { type: 'string', description: 'The connection ID' },
+        connectionId: { type: 'string', description: 'Optional: filter by connection ID' },
       },
-      required: ['connectionId'],
     },
   },
   {
@@ -261,7 +260,8 @@ export function registerTools(server: Server, daemonUrl: string) {
         }
 
         case 'list_watchers': {
-          const res = await fetch(`${daemonUrl}/watchers?connectionId=${args?.connectionId}`)
+          const params = args?.connectionId ? `?connectionId=${args.connectionId}` : ''
+          const res = await fetch(`${daemonUrl}/watchers${params}`)
           return text(await res.text())
         }
 

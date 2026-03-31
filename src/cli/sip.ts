@@ -49,35 +49,15 @@ export async function run(args: string[]) {
 
     console.log(`[${time}]${topic ? ` topic=${topic}` : ''}`)
 
-    // Try to pretty-print JSON payload
+    // Pretty-print JSON payload with indentation
     try {
       const parsed = JSON.parse(payload)
-      const summary = summarizePayload(parsed)
-      if (summary) {
-        console.log(`         ${summary}`)
-      } else {
-        console.log(`         ${payload.slice(0, 120)}${payload.length > 120 ? '...' : ''}`)
-      }
+      const pretty = JSON.stringify(parsed, null, 2)
+      const indented = pretty.split('\n').map((l) => `         ${l}`).join('\n')
+      console.log(indented)
     } catch {
-      console.log(`         ${payload.slice(0, 120)}${payload.length > 120 ? '...' : ''}`)
+      console.log(`         ${payload}`)
     }
     console.log()
   }
-}
-
-function summarizePayload(obj: any, prefix = '', depth = 0): string {
-  if (depth > 2) return ''
-  const parts: string[] = []
-
-  for (const [key, val] of Object.entries(obj)) {
-    if (val && typeof val === 'object' && !Array.isArray(val)) {
-      const nested = summarizePayload(val, `${prefix}${key}.`, depth + 1)
-      if (nested) parts.push(nested)
-    } else if (typeof val === 'number') {
-      parts.push(`${prefix}${key}=${typeof val === 'number' ? val.toFixed(1) : val}`)
-    } else if (typeof val === 'boolean') {
-      parts.push(`${prefix}${key}=${val}`)
-    }
-  }
-  return parts.join(' ')
 }

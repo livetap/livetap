@@ -159,8 +159,7 @@ async function boot() {
 
       // --- List watchers ---
       if (method === 'GET' && url.pathname === '/watchers') {
-        const connId = url.searchParams.get('connectionId')
-        if (!connId) return json({ error: 'connectionId query param required' }, 400)
+        const connId = url.searchParams.get('connectionId') || undefined
         return json(await watchers.list(connId))
       }
 
@@ -178,9 +177,9 @@ async function boot() {
           const info = await watchers.get(id)
           if (!info) return json({ error: 'Watcher not found' }, 404)
           const record = manager.get(info.connectionId)
-          if (!record) return json({ error: 'Connection not found' }, 404)
+          const streamKey = record?.streamKey ?? null
           try {
-            const updated = await watchers.update(id, record.streamKey, body)
+            const updated = await watchers.update(id, streamKey, body)
             return json(updated)
           } catch (err) {
             return json({ error: (err as Error).message }, 400)
@@ -209,8 +208,8 @@ async function boot() {
         const info = await watchers.get(id)
         if (!info) return json({ error: 'Watcher not found' }, 404)
         const record = manager.get(info.connectionId)
-        if (!record) return json({ error: 'Connection not found' }, 404)
-        const ok = await watchers.restart(id, record.streamKey)
+        const streamKey = record?.streamKey ?? null
+        const ok = await watchers.restart(id, streamKey)
         if (!ok) return json({ error: 'Watcher not found' }, 404)
         return json({ restarted: id })
       }

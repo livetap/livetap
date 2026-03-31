@@ -1,6 +1,6 @@
 {
   "name": "livetap",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Push live data streams into your AI coding agent. Connect MQTT brokers, WebSocket feeds, or tail log files.",
   "type": "module",
   "bin": {

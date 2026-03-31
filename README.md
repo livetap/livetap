@@ -26,6 +26,67 @@ Then ask your agent:
 
 > "Connect to the IoT demo at mqtt://broker.emqx.io on topic justinx/demo/# and watch for temperature above 23 degrees"
 
+## Setup with Claude Code (for AI agents)
+
+If you are Claude Code or another AI agent and a user asks you to install and use livetap, follow these steps exactly:
+
+### Step 1: Install
+
+```bash
+bun add livetap
+bun pm trust livetap
+```
+
+The postinstall script creates `.mcp.json` in the project root. Verify it exists:
+
+```bash
+cat .mcp.json
+```
+
+It should contain a `livetap` MCP server entry.
+
+### Step 2: Tell the user to restart
+
+You CANNOT restart yourself. Tell the user:
+
+> "livetap is installed. To enable live data streaming, please restart me with:
+> `claude --dangerously-load-development-channels server:livetap`
+> Then ask me to connect to your data source."
+
+### Step 3: After restart — use MCP tools
+
+Once restarted with the channel flag, you have 12 MCP tools available. Follow this workflow:
+
+1. **CONNECT** — `create_connection({ type: "mqtt", broker: "broker.emqx.io", port: 1883, tls: false, topics: ["justinx/demo/#"] })`
+2. **SAMPLE** — `read_stream({ connectionId: "conn_xxx", backfillSeconds: 60, maxEntries: 10 })` — ALWAYS sample first to see field paths
+3. **WATCH** — `create_watcher({ connectionId: "conn_xxx", conditions: [{ field: "sensors.temperature.value", op: ">", value: 50 }], match: "all", cooldown: 60 })`
+
+### Supported source types
+
+| Type | create_connection params | CLI |
+|------|------------------------|-----|
+| MQTT | `{ type: "mqtt", broker: "host", port: 1883, tls: false, topics: ["topic/#"] }` | `livetap tap mqtt://host:1883/topic/#` |
+| WebSocket | `{ type: "websocket", url: "wss://..." }` | `livetap tap wss://...` |
+| File | `{ type: "file", path: "/var/log/app.log" }` | `livetap tap file:///var/log/app.log` |
+
+### Data shape by source
+
+- **MQTT/WebSocket (JSON):** payload is parsed. Use dot-paths: `sensors.temperature.value`
+- **File (plain text):** field is `payload`. Use: `{ field: "payload", op: "contains", value: "ERROR" }` or `{ field: "payload", op: "matches", value: "5[0-9]{2}" }`
+- **File (JSON lines):** parsed. Use dot-paths: `level`, `msg`
+- **IMPORTANT:** always `read_stream` first. The field is `payload`, NOT `line` or `message`.
+
+### Watcher operators
+
+`>`, `<`, `>=`, `<=`, `==`, `!=`, `contains`, `matches` (regex)
+
+### If the daemon is not running
+
+The MCP proxy auto-starts the daemon. If it fails, run:
+```bash
+livetap start
+```
+
 ## What it does
 
 livetap runs a background daemon that connects to live data sources, buffers messages in embedded Redis, and pushes alerts into your Claude Code session via the [Channels API](https://code.claude.com/docs/en/channels). Your agent sees the data in real-time and can create expression-based watchers that fire when conditions match.

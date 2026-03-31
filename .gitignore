@@ -2,3 +2,4 @@
 node_modules/
 .cursor/
 dump.rdb
+alerts.txt

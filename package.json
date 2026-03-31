@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
-    "mqtt": "^5.15.1"
+    "ioredis": "^5.10.1",
+    "mqtt": "^5.15.1",
+    "redis-server": "^1.2.2"
   }
 }

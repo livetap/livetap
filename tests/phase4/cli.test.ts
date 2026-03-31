@@ -122,6 +122,34 @@ test('sip with no entries shows helpful message', async () => {
   await cli('untap', connId)
 })
 
+test('watch with matches operator parses correctly', async () => {
+  const tapOut = await cli('tap', 'webhook')
+  const connId = tapOut.match(/conn_[0-9a-f]+/)?.[0]!
+
+  const watchOut = await cli('watch', connId, "payload matches 'ERROR|FATAL'")
+  expect(watchOut).toContain('Watcher created:')
+  expect(watchOut).toContain('matches')
+
+  const watcherId = watchOut.match(/w_[0-9a-f]+/)?.[0]!
+  await cli('unwatch', watcherId)
+  await cli('untap', connId)
+})
+
+test('tap file:// parses URI correctly', async () => {
+  // Create a temp file for the test
+  const { writeFileSync } = require('fs')
+  writeFileSync('/tmp/livetap-cli-test.log', '')
+
+  const out = await cli('tap', 'file:///tmp/livetap-cli-test.log')
+  expect(out).toContain('Tapped:')
+  expect(out).toContain('file')
+
+  const connId = out.match(/conn_[0-9a-f]+/)?.[0]!
+  await cli('untap', connId)
+
+  require('fs').unlinkSync('/tmp/livetap-cli-test.log')
+})
+
 test('unknown command shows error', async () => {
   const out = await cli('bogus')
   expect(out).toContain('Unknown command')

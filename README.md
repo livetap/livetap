@@ -28,32 +28,56 @@ Then ask your agent:
 
 ## Setup with Claude Code (for AI agents)
 
-If you are Claude Code or another AI agent and a user asks you to install and use livetap, follow these steps exactly:
+If you are Claude Code or another AI agent and a user asks you to install and use livetap, follow these steps **exactly**. Do NOT improvise — livetap uses stdio MCP (not HTTP), and requires Bun (not npm/node).
 
-### Step 1: Install
+### Step 1: Install with Bun (NOT npm)
 
 ```bash
-bun add livetap
-bun pm trust livetap
+bun init -y              # if no package.json exists
+bun add livetap          # MUST use bun, not npm — postinstall needs bun
+bun pm trust livetap     # required — bun blocks untrusted postinstall scripts
 ```
 
-The postinstall script creates `.mcp.json` in the project root. Verify it exists:
+### Step 2: Verify .mcp.json was created
+
+The postinstall creates `.mcp.json` in the project root. Check it:
 
 ```bash
 cat .mcp.json
 ```
 
-It should contain a `livetap` MCP server entry.
+It should look like this (path will vary):
+```json
+{
+  "mcpServers": {
+    "livetap": {
+      "command": "bun",
+      "args": ["/path/to/node_modules/livetap/src/mcp/channel.ts"]
+    }
+  }
+}
+```
 
-### Step 2: Tell the user to restart
+**IMPORTANT:** livetap is a **stdio MCP server** (command + args), NOT an HTTP MCP server. Do NOT add it to `~/.claude/mcp.json` as `"type": "http"`. The `.mcp.json` in the project root is correct.
 
-You CANNOT restart yourself. Tell the user:
+If `.mcp.json` was not created, create it manually:
+```bash
+echo '{"mcpServers":{"livetap":{"command":"bun","args":["'$(pwd)'/node_modules/livetap/src/mcp/channel.ts"]}}}' > .mcp.json
+```
 
-> "livetap is installed. To enable live data streaming, please restart me with:
-> `claude --dangerously-load-development-channels server:livetap`
+### Step 3: Tell the user to restart Claude Code
+
+You CANNOT restart yourself. Tell the user exactly this:
+
+> "livetap is installed and configured. Please restart Claude Code with:
+> ```
+> claude --dangerously-load-development-channels server:livetap
+> ```
 > Then ask me to connect to your data source."
 
-### Step 3: After restart — use MCP tools
+Do NOT try to start the daemon yourself — the MCP proxy auto-starts it when Claude Code restarts.
+
+### Step 4: After restart — use MCP tools
 
 Once restarted with the channel flag, you have 12 MCP tools available. Follow this workflow:
 

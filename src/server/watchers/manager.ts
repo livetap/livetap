@@ -206,12 +206,14 @@ export class WatcherManager {
                 fields[fieldArray[i]] = fieldArray[i + 1]
               }
 
-              // Parse payload JSON
+              // Parse payload: try JSON first, fall back to raw fields
               let payload: any
               try {
                 payload = JSON.parse(fields.payload ?? '{}')
               } catch {
-                continue // skip non-JSON
+                // Plain text — use raw Redis fields as the payload
+                // This allows conditions like { field: "payload", op: "contains", value: "ERROR" }
+                payload = fields
               }
 
               // Log missing fields (throttled: once per field per minute)

@@ -10,11 +10,11 @@ test('package.json has required fields', () => {
   expect(pkg.version).toMatch(/^\d+\.\d+\.\d+$/)
   expect(pkg.description).toBeTruthy()
   expect(pkg.license).toBe('MIT')
-  expect(pkg.bin?.livetap).toBe('./bin/livetap.ts')
+  expect(pkg.bin?.livetap).toBe('./bin/livetap.js')
 })
 
-test('package.json has postinstall script', () => {
-  expect(pkg.scripts?.postinstall).toContain('postinstall.ts')
+test('package.json description includes llm-help hint', () => {
+  expect(pkg.description).toContain('llm-help')
 })
 
 test('package.json has keywords', () => {
@@ -29,7 +29,7 @@ test('package.json files array includes required paths', () => {
   expect(pkg.files).toContain('src/')
   expect(pkg.files).toContain('README.md')
   expect(pkg.files).toContain('LICENSE')
-  expect(pkg.files).toContain('scripts/postinstall.ts')
+  // postinstall removed — setup command replaces it
 })
 
 test('package.json files array excludes tests and docs', () => {

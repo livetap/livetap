@@ -22,6 +22,12 @@ export interface CatalogCommand {
  * are generated from this array.
  */
 export const CLI_COMMANDS: CatalogCommand[] = [
+  // --- Setup ---
+  {
+    name: 'setup',
+    usage: 'livetap setup',
+    description: 'Configure .mcp.json for Claude Code and print restart instructions. Run this after npm install.',
+  },
   // --- Daemon ---
   {
     name: 'start',

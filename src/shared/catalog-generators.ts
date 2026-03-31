@@ -50,8 +50,23 @@ export function generateHelpText(): string {
 export function generateLlmHelp(): object {
   return {
     name: 'livetap',
-    version: '0.1.0',
+    version: '0.1.4',
     description: 'Push live data streams into your AI coding agent',
+    setup: {
+      steps: [
+        'Step 1: npm install livetap (skip if already installed)',
+        'Step 2: npx livetap setup (creates .mcp.json in project root — do NOT create it manually)',
+        'Step 3: Tell user to restart Claude Code: claude --dangerously-load-development-channels server:livetap --continue',
+        'Step 4: After restart, use create_connection to connect, read_stream to sample, create_watcher to alert',
+      ],
+      do_not: [
+        'Do NOT add livetap to ~/.claude/mcp.json — it goes in .mcp.json in the project root',
+        'Do NOT configure livetap as type:http — it is a stdio MCP server (command + args)',
+        'Do NOT start the daemon manually — the MCP proxy auto-starts it on Claude restart',
+        'Do NOT guess field names — always read_stream first to see actual payload structure',
+        'Do NOT use npm init — use the existing project directory',
+      ],
+    },
     commands: CLI_COMMANDS,
     mcp_tools: TOOLS,
   }

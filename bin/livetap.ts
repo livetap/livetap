@@ -16,6 +16,7 @@ const commands: Record<string, () => Promise<void>> = {
   watch:    () => import('../src/cli/watch.js').then((m) => m.run(args)),
   unwatch:  () => import('../src/cli/unwatch.js').then((m) => m.run(args)),
   watchers: () => import('../src/cli/watchers.js').then((m) => m.run(args)),
+  setup:    () => import('../src/cli/setup.js').then((m) => m.run(args)),
   mcp:      () => import('../src/mcp/channel.js'),
   help:     () => import('../src/cli/help.js').then((m) => m.run(args)),
 }

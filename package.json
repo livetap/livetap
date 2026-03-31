@@ -1,13 +1,12 @@
 {
   "name": "livetap",
-  "version": "0.1.3",
-  "description": "Push live data streams into your AI coding agent. Connect MQTT brokers, WebSocket feeds, or tail log files.",
+  "version": "0.1.4",
+  "description": "Push live data streams into your AI coding agent. LLM/AI agent? Run: npx livetap --llm-help",
   "type": "module",
   "bin": {
     "livetap": "./bin/livetap.js"
   },
   "scripts": {
-    "postinstall": "bun ./scripts/postinstall.ts",
     "test": "bun test"
   },
   "keywords": [
@@ -24,7 +23,6 @@
   "files": [
     "bin/",
     "src/",
-    "scripts/postinstall.ts",
     "README.md",
     "LICENSE"
   ],

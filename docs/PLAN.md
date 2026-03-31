@@ -38,8 +38,8 @@ CC: Summarizes the alert in one line, appends to output.txt.
 | Watcher model | Expression-based (structured conditions) | Not full TypeScript scripts. Field/op/value triples evaluated in-process. |
 | Watcher actions | Channel alert + configurable action | Default: push channel event. Optional: webhook POST, shell command. |
 | MCP tools | Mirror JustinX tool surface | Same 11 tools. create_watcher takes expression instead of scriptContent. |
-| Connection creation | CLI + agent (both paths) | `livetap connect <uri or json>` from terminal, or agent calls create_connection via MCP. |
-| Multi-source | CLI for quick, config file for persistent | Ad-hoc: `livetap connect mqtt://...`. Persistent: livetap.json (v0.1). |
+| Connection creation | CLI + agent (both paths) | `livetap tap <uri or json>` from terminal, or agent calls create_connection via MCP. |
+| Multi-source | CLI for quick, config file for persistent | Ad-hoc: `livetap tap mqtt://...`. Persistent: livetap.json (v0.1). |
 | Process model | Background daemon + thin MCP channel proxy | Daemon survives Claude restarts. MCP proxy is spawned by Claude, connects to daemon on :8788. |
 | Daemon discovery | Fixed port :8788 | `LIVETAP_PORT` env var to override. |
 | Install flow | postinstall writes .mcp.json | `npm install livetap` → postinstall adds MCP entry → user restarts Claude. |
@@ -71,7 +71,7 @@ Tests live in `tests/` and run with `bun test`. Each phase adds tests for its ow
 export interface CatalogTool {
   name: string;                    // MCP tool name: "create_connection"
   description: string;             // Shared description for MCP + CLI + llm-help
-  cli?: string;                    // CLI equivalent: "livetap connect <uri|file.json>"
+  cli?: string;                    // CLI equivalent: "livetap tap <uri|file.json>"
   params: Record<string, {         // Zod-compatible param definitions
     type: string;
     description: string;
@@ -81,7 +81,7 @@ export interface CatalogTool {
   }>;
   examples: {
     description: string;           // "Connect to MQTT broker"
-    cli?: string;                  // "livetap connect mqtt://broker.emqx.io:1883/sensors/#"
+    cli?: string;                  // "livetap tap mqtt://broker.emqx.io:1883/sensors/#"
     tool?: string;                 // '{ type: "mqtt", broker: "broker.emqx.io", ... }'
   }[];
 }
@@ -127,7 +127,7 @@ export function generateLlmHelp(catalog: typeof COMMAND_CATALOG): object
   "commands": [
     {
       "name": "connect",
-      "usage": "livetap connect <source>",
+      "usage": "livetap tap <source>",
       "description": "Connect to a data source",
       "args": [{ "position": 0, "name": "source", "required": true }],
       "flags": [
@@ -135,10 +135,10 @@ export function generateLlmHelp(catalog: typeof COMMAND_CATALOG): object
         { "name": "--sample", "type": "string", "description": "Sample interval (e.g. 30s)" }
       ],
       "examples": [
-        "livetap connect mqtt://broker.emqx.io:1883/sensors/#",
-        "livetap connect wss://stream.example.com/prices",
-        "livetap connect webhook",
-        "livetap connect connection.json"
+        "livetap tap mqtt://broker.emqx.io:1883/sensors/#",
+        "livetap tap wss://stream.example.com/prices",
+        "livetap tap webhook",
+        "livetap tap connection.json"
       ]
     }
   ],
@@ -540,7 +540,7 @@ tests/phase3/
 
 ### Phase 4: CLI
 
-**Goal:** Human-facing CLI for managing livetap outside of the agent. `livetap start/stop/status` for the daemon, `livetap connect/disconnect/connections` for sources, `livetap sample` for quick stream inspection, `livetap watch/unwatch/watchers` for watcher management.
+**Goal:** Human-facing CLI for managing livetap outside of the agent. `livetap start/stop/status` for the daemon, `livetap tap/untap/taps` for sources, `livetap sip` for quick stream inspection, `livetap watch/unwatch/watchers` for watcher management.
 
 **Build:**
 
@@ -553,10 +553,10 @@ const commands: Record<string, () => Promise<void>> = {
   start:       () => import('../src/cli/start.js').then(m => m.run(args)),
   stop:        () => import('../src/cli/stop.js').then(m => m.run(args)),
   status:      () => import('../src/cli/status.js').then(m => m.run(args)),
-  connect:     () => import('../src/cli/connect.js').then(m => m.run(args)),
-  disconnect:  () => import('../src/cli/disconnect.js').then(m => m.run(args)),
-  connections: () => import('../src/cli/connections.js').then(m => m.run(args)),
-  sample:      () => import('../src/cli/sample.js').then(m => m.run(args)),
+  tap:         () => import('../src/cli/tap.js').then(m => m.run(args)),
+  untap:       () => import('../src/cli/untap.js').then(m => m.run(args)),
+  taps:        () => import('../src/cli/taps.js').then(m => m.run(args)),
+  sip:         () => import('../src/cli/sip.js').then(m => m.run(args)),
   watch:       () => import('../src/cli/watch.js').then(m => m.run(args)),
   unwatch:     () => import('../src/cli/unwatch.js').then(m => m.run(args)),
   watchers:    () => import('../src/cli/watchers.js').then(m => m.run(args)),
@@ -607,29 +607,29 @@ Watchers (2):
 ```
 - If daemon not running: `livetap is not running. Use 'livetap start' to begin.`
 
-**`livetap connect <uri-or-file>`** — `src/cli/connect.ts`:
+**`livetap tap <uri-or-file>`** — `src/cli/tap.ts`:
 - If arg ends in `.json`: read file, parse as ConnectionConfig, POST to daemon
 - If arg starts with `mqtt://`: parse URI into MqttConnectionConfig
   - `mqtt://user:pass@host:port/topic/path/#` → `{ type: 'mqtt', broker: host, port, credentials: {user, pass}, topics: ['topic/path/#'] }`
 - If arg starts with `ws://` or `wss://`: parse as WebSocket
   - `wss://stream.example.com/prices` → `{ type: 'websocket', url: arg }`
 - If arg is `webhook`: create webhook connection, print ingest URL
-  - `livetap connect webhook` → `{ type: 'webhook' }` → prints `Webhook ingest URL: http://localhost:8788/ingest/conn_xxx`
+  - `livetap tap webhook` → `{ type: 'webhook' }` → prints `Webhook ingest URL: http://localhost:8788/ingest/conn_xxx`
 - POST to `http://localhost:{port}/connections`
-- Print: `Connected: conn_a1b2c3d4 (mqtt → broker.emqx.io/sensors/#)`
+- Print: `Tapped: conn_a1b2c3d4 (mqtt → broker.emqx.io/sensors/#)`
 - Flags: `--name "My MQTT Feed"`, `--sample 30s`
 
-**`livetap disconnect <connectionId>`** — `src/cli/disconnect.ts`:
+**`livetap untap <connectionId>`** — `src/cli/untap.ts`:
 - DELETE `http://localhost:{port}/connections/{connectionId}`
-- Print: `Disconnected: conn_a1b2c3d4`
+- Print: `Untapped: conn_a1b2c3d4`
 - If connection has watchers: warn `This will also stop 2 watchers. Continue? (y/n)`
 
-**`livetap connections`** — `src/cli/connections.ts`:
+**`livetap taps`** — `src/cli/taps.ts`:
 - GET `http://localhost:{port}/connections`
-- Table output (same format as `status` but connections only)
+- Table output (same format as `status` but taps only)
 - Flags: `--json` for raw JSON output
 
-**`livetap sample <connectionId>`** — `src/cli/sample.ts`:
+**`livetap sip <connectionId>`** — `src/cli/sip.ts`:
 - GET `http://localhost:{port}/read_stream?connectionId={id}&backfillSeconds=60&maxEntries=10`
 - Pretty-print entries with timestamps:
 ```
@@ -673,16 +673,16 @@ livetap — Push live data streams into your AI coding agent
 Usage:
   livetap start                              Start the livetap daemon
   livetap stop                               Stop the daemon
-  livetap status                             Show daemon, connections, and watchers
+  livetap status                             Show daemon, taps, and watchers
 
-  livetap connect <uri|file.json>            Connect to a data source
-  livetap connect mqtt://host/topic/#        Quick MQTT connect
-  livetap connect wss://host/path            Quick WebSocket connect
-  livetap connect webhook                    Create webhook ingest endpoint
-  livetap disconnect <connectionId>          Remove a connection
+  livetap tap <uri|file.json>                Tap into a data source
+  livetap tap mqtt://host/topic/#            Quick MQTT tap
+  livetap tap wss://host/path                Quick WebSocket tap
+  livetap tap webhook                        Create webhook ingest endpoint
+  livetap untap <connectionId>               Remove a tap
 
-  livetap connections                        List active connections
-  livetap sample <connectionId>              Sample recent stream entries
+  livetap taps                               List active taps
+  livetap sip <connectionId>                 Sip from a stream (sample recent entries)
 
   livetap watch <connId> "field > value"     Create a watcher
   livetap unwatch <watcherId>                Remove a watcher
@@ -691,7 +691,7 @@ Usage:
 Options:
   --port <n>        Daemon port (default 8788, env: LIVETAP_PORT)
   --foreground      Run daemon in foreground (start only)
-  --json            Output as JSON (connections, watchers, sample)
+  --json            Output as JSON (taps, watchers, sip)
   --help, -h        Show this help
 ```
 
@@ -705,12 +705,12 @@ All CLI commands talk to the daemon via HTTP on the port from `~/.livetap/state.
 tests/phase4/
 ├── cli-start-stop.test.ts     # Start daemon via CLI → verify state.json written → verify :port responds → stop → verify port free + state.json removed
 ├── cli-start-already.test.ts  # Start when already running → verify "already running" message, no second daemon
-├── cli-connect-mqtt.test.ts   # livetap connect mqtt://broker.emqx.io:1883/sensors/# → verify connection on daemon
-├── cli-connect-ws.test.ts     # livetap connect wss://localhost:{ws-fixture-port} → verify connection on daemon
-├── cli-connect-webhook.test.ts# livetap connect webhook → verify ingest URL printed → POST to it → verify in Redis
-├── cli-connect-json.test.ts   # livetap connect tests/fixtures/connection.json → verify parsed correctly
+├── cli-tap-mqtt.test.ts   # livetap tap mqtt://broker.emqx.io:1883/sensors/# → verify connection on daemon
+├── cli-tap-ws.test.ts     # livetap tap wss://localhost:{ws-fixture-port} → verify connection on daemon
+├── cli-tap-webhook.test.ts# livetap tap webhook → verify ingest URL printed → POST to it → verify in Redis
+├── cli-tap-json.test.ts   # livetap tap tests/fixtures/connection.json → verify parsed correctly
 ├── cli-status.test.ts         # Start + create connection → livetap status → verify output includes connection info
-├── cli-sample.test.ts         # Create webhook connection → push data → livetap sample <id> → verify entries printed
+├── cli-sip.test.ts            # Create webhook tap → push data → livetap sip <id> → verify entries printed
 ├── cli-watch-unwatch.test.ts  # livetap watch conn "temp > 50" → verify watcher created → livetap unwatch → verify removed
 ├── cli-watchers.test.ts       # Create watchers → livetap watchers → verify table output
 ├── cli-help.test.ts           # livetap help → verify output contains all commands
@@ -734,15 +734,15 @@ tests/phase4/
 - Manual end-to-end from terminal only (no Claude Code):
   ```bash
   livetap start
-  livetap connect mqtt://broker.emqx.io:1883/justinx/demo/#
-  livetap connections
-  livetap sample conn_xxx
+  livetap tap mqtt://broker.emqx.io:1883/justinx/demo/#
+  livetap taps
+  livetap sip conn_xxx
   livetap watch conn_xxx "sensors.temperature.value > 20"
   livetap watchers
   # wait for match...
   livetap watchers --logs w_xxx
   livetap unwatch w_xxx
-  livetap disconnect conn_xxx
+  livetap untap conn_xxx
   livetap stop
   ```
 
@@ -962,7 +962,7 @@ claude --dangerously-load-development-channels server:livetap
 ```bash
 bun install -g @livetap    # installs `livetap` binary globally
 livetap start              # start daemon from any directory
-livetap connect mqtt://broker.emqx.io:1883/sensors/#
+livetap tap mqtt://broker.emqx.io:1883/sensors/#
 ```
 When installed globally, postinstall writes to `~/.mcp.json` (user-level MCP config) instead of project-level.
 
@@ -1001,8 +1001,8 @@ tests/phase5/
   # Verify MCP entry point
   bunx @livetap start
   bunx @livetap status
-  bunx @livetap connect mqtt://broker.emqx.io:1883/justinx/demo/#
-  bunx @livetap sample <conn_id>
+  bunx @livetap tap mqtt://broker.emqx.io:1883/justinx/demo/#
+  bunx @livetap sip <conn_id>
   bunx @livetap stop
 
   # Clean up
@@ -1196,7 +1196,7 @@ class WebSocketSubscriber implements Subscriber {
     // ...existing mqtt, webhook...
     {
       description: 'Connect to a WebSocket stream',
-      cli: 'livetap connect wss://stream.example.com/prices',
+      cli: 'livetap tap wss://stream.example.com/prices',
       tool: '{ type: "websocket", url: "wss://stream.example.com/prices" }'
     },
     {
@@ -1248,8 +1248,8 @@ function createWsServer(opts: WsServerOptions = {}) {
   ```bash
   livetap start
   # Binance BTC trades (public, no auth)
-  livetap connect 'wss://stream.binance.com:9443/ws/btcusdt@trade'
-  livetap sample <conn_id>
+  livetap tap 'wss://stream.binance.com:9443/ws/btcusdt@trade'
+  livetap sip <conn_id>
   # Should see: {"e":"trade","s":"BTCUSDT","p":"67234.50",...}
   livetap watch <conn_id> "p > 70000"    # alert if BTC > $70k
   livetap stop
@@ -1617,10 +1617,10 @@ livetap stop                     # Stop daemon
 livetap status                   # Show daemon status, connections, watchers
 
 # Connections
-livetap connect mqtt://broker.emqx.io/sensors/#       # Quick URI
-livetap connect connection.json                         # Full config
-livetap connections                                     # List
-livetap disconnect <connectionId>                       # Remove
+livetap tap mqtt://broker.emqx.io/sensors/#       # Quick URI
+livetap tap connection.json                         # Full config
+livetap taps                                     # List
+livetap untap <connectionId>                       # Remove
 
 # Watchers
 livetap watch <connectionId> --field temp --op gt --value 50
@@ -1628,8 +1628,8 @@ livetap watchers <connectionId>
 livetap unwatch <connectionId> <watcherId>
 
 # Sampling
-livetap sample <connectionId>                           # Read latest entries
-livetap sample <connectionId> --live 10                 # Stream for 10s
+livetap sip <connectionId>                              # Sip from stream (sample recent entries)
+livetap sip <connectionId> --live 10                    # Stream for 10s
 ```
 
 ## Install Flow
@@ -1678,10 +1678,17 @@ claude --dangerously-load-development-channels server:livetap
 │   │   ├── channel.ts          # Thin MCP stdio proxy (channel + tools)
 │   │   └── tools.ts            # Tool definitions (mirroring JustinX)
 │   └── cli/
-│       ├── serve.ts
-│       ├── connect.ts
+│       ├── start.ts
+│       ├── stop.ts
 │       ├── status.ts
-│       └── sample.ts
+│       ├── tap.ts
+│       ├── untap.ts
+│       ├── taps.ts
+│       ├── sip.ts
+│       ├── watch.ts
+│       ├── unwatch.ts
+│       ├── watchers.ts
+│       └── help.ts
 ├── package.json
 ├── tsconfig.json
 └── livetap.json                # Optional config file (v0.1)

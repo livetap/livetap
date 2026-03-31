@@ -15,8 +15,9 @@ export function generateHelpText(): string {
     'Usage:',
   ]
 
-  // Group: daemon, connections, sampling, watchers
+  // Group: setup, daemon, connections, sampling, watchers
   const groups: { label: string; commands: string[] }[] = [
+    { label: '', commands: ['setup'] },
     { label: '', commands: ['start', 'stop', 'status'] },
     { label: '', commands: ['tap', 'untap', 'taps'] },
     { label: '', commands: ['sip'] },

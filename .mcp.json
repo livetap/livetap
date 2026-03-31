@@ -2,7 +2,7 @@
   "mcpServers": {
     "livetap": {
       "command": "bun",
-      "args": ["run", "scripts/livetap-channel.ts"]
+      "args": ["run", "src/mcp/channel.ts"]
     }
   }
 }

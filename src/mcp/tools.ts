@@ -1,0 +1,156 @@
+/**
+ * MCP Tool definitions for livetap.
+ * Registers tools on an MCP Server that proxy to the daemon HTTP API.
+ */
+
+import { z } from 'zod'
+import type { Server } from '@modelcontextprotocol/sdk/server/index.js'
+import {
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js'
+
+const TOOLS = [
+  {
+    name: 'create_connection',
+    description: 'Create a data connection. MQTT: connects to a broker and subscribes to topics. WebSocket: connects to a remote WS URL. Webhook: creates an HTTP ingest endpoint.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        type: { type: 'string', enum: ['mqtt', 'webhook', 'websocket'], description: 'Source type', default: 'mqtt' },
+        name: { type: 'string', description: 'Display name for the connection' },
+        broker: { type: 'string', description: 'MQTT broker hostname (required for mqtt)' },
+        port: { type: 'number', description: 'Broker port (default 1883 for mqtt)', default: 1883 },
+        tls: { type: 'boolean', description: 'Use TLS (default false)', default: false },
+        username: { type: 'string', description: 'MQTT username', default: '' },
+        password: { type: 'string', description: 'MQTT password', default: '' },
+        topics: { type: 'array', items: { type: 'string' }, description: 'MQTT topic filters (required for mqtt)' },
+        url: { type: 'string', description: 'WebSocket URL (required for websocket)' },
+        headers: { type: 'object', description: 'WebSocket auth headers' },
+        handshake: { type: 'string', description: 'Message to send after WS connect (e.g. subscription JSON)' },
+      },
+    },
+  },
+  {
+    name: 'list_connections',
+    description: 'List all active connections with their status, message rate, and buffered count.',
+    inputSchema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'get_connection',
+    description: 'Get detailed status of a specific connection.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        connectionId: { type: 'string', description: 'The connection ID (e.g. "conn_a1b2c3d4")' },
+      },
+      required: ['connectionId'],
+    },
+  },
+  {
+    name: 'destroy_connection',
+    description: 'Destroy a connection — stops the source subscriber, cleans up the Redis stream.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        connectionId: { type: 'string', description: 'The connection ID to destroy' },
+      },
+      required: ['connectionId'],
+    },
+  },
+  {
+    name: 'read_stream',
+    description: "Read recent entries from a connection's live stream. Use this to inspect what data is flowing through a connection and understand the payload structure before creating watchers.",
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        connectionId: { type: 'string', description: 'The connection ID to read from' },
+        backfillSeconds: { type: 'number', description: 'Include entries from the last N seconds (default 60)', default: 60 },
+        maxEntries: { type: 'number', description: 'Max entries to return (default 10)', default: 10 },
+      },
+      required: ['connectionId'],
+    },
+  },
+]
+
+function text(content: string) {
+  return { content: [{ type: 'text' as const, text: content }] }
+}
+
+function error(content: string) {
+  return { content: [{ type: 'text' as const, text: content }], isError: true }
+}
+
+/**
+ * Register all livetap MCP tools on the given server.
+ * Tools proxy to the daemon HTTP API at the given base URL.
+ */
+export function registerTools(server: Server, daemonUrl: string) {
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: TOOLS,
+  }))
+
+  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+    const { name, arguments: args } = req.params
+    try {
+      switch (name) {
+        case 'create_connection': {
+          const config: any = { type: args?.type ?? 'mqtt' }
+          if (config.type === 'mqtt') {
+            config.broker = args?.broker
+            config.port = args?.port ?? 1883
+            config.tls = args?.tls ?? false
+            config.credentials = { username: args?.username ?? '', password: args?.password ?? '' }
+            config.topics = args?.topics
+            if (!config.broker || !config.topics?.length) {
+              return error('Error: broker and topics are required for mqtt connections')
+            }
+          } else if (config.type === 'websocket') {
+            config.url = args?.url
+            if (args?.headers) config.headers = args.headers
+            if (args?.handshake) config.handshake = args.handshake
+            if (!config.url) return error('Error: url is required for websocket connections')
+          }
+          // webhook needs no extra params
+          const res = await fetch(`${daemonUrl}/connections`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...config, name: args?.name }),
+          })
+          return text(await res.text())
+        }
+
+        case 'list_connections': {
+          const res = await fetch(`${daemonUrl}/connections`)
+          return text(await res.text())
+        }
+
+        case 'get_connection': {
+          const res = await fetch(`${daemonUrl}/connections/${args?.connectionId}`)
+          if (!res.ok) return error('Connection not found')
+          return text(await res.text())
+        }
+
+        case 'destroy_connection': {
+          const res = await fetch(`${daemonUrl}/connections/${args?.connectionId}`, { method: 'DELETE' })
+          if (!res.ok) return error('Connection not found')
+          return text(await res.text())
+        }
+
+        case 'read_stream': {
+          const params = new URLSearchParams()
+          if (args?.backfillSeconds) params.set('backfillSeconds', String(args.backfillSeconds))
+          if (args?.maxEntries) params.set('maxEntries', String(args.maxEntries))
+          const res = await fetch(`${daemonUrl}/connections/${args?.connectionId}/stream?${params}`)
+          if (!res.ok) return error('Connection not found')
+          return text(await res.text())
+        }
+
+        default:
+          return error(`Unknown tool: ${name}`)
+      }
+    } catch (err) {
+      return error(`livetap daemon error: ${(err as Error).message}. Is the daemon running?`)
+    }
+  })
+}

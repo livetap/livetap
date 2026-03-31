@@ -1,6 +1,6 @@
 {
   "name": "livetap",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Push live data streams into your AI coding agent. LLM/AI agent? Run: npx livetap --llm-help",
   "type": "module",
   "bin": {

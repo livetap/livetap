@@ -10,7 +10,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 
-export const TOOLS = [
+const TOOLS = [
   {
     name: 'create_connection',
     description: 'Create a data connection. MQTT: connects to a broker and subscribes to topics. WebSocket: connects to a remote WS URL. Webhook: creates an HTTP ingest endpoint.',

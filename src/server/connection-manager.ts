@@ -7,6 +7,7 @@ import type { ConnectionConfig, ConnectionRecord, ConnectionStatus, Subscriber }
 import { MqttSubscriber } from './connections/mqtt.js'
 import { WebhookIngestor } from './connections/webhook.js'
 import { WsSubscriber } from './connections/websocket.js'
+import { FileSubscriber } from './connections/file.js'
 
 function generateId(): string {
   const hex = Array.from(crypto.getRandomValues(new Uint8Array(4)))
@@ -61,6 +62,13 @@ export class ConnectionManager {
       })
     } else if (config.type === 'websocket') {
       record.subscriber = new WsSubscriber({
+        config,
+        streamKey,
+        redis: this.redis,
+        onMessage,
+      })
+    } else if (config.type === 'file') {
+      record.subscriber = new FileSubscriber({
         config,
         streamKey,
         redis: this.redis,
@@ -156,6 +164,8 @@ export class ConnectionManager {
         return `webhook ingest`
       case 'websocket':
         return r.config.url
+      case 'file':
+        return `file://${r.config.path}`
     }
   }
 }

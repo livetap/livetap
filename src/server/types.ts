@@ -33,10 +33,16 @@ export interface WebSocketConnectionConfig {
   binaryFormat?: 'json' | 'text' | 'base64'
 }
 
+export interface FileConnectionConfig {
+  type: 'file'
+  path: string
+}
+
 export type ConnectionConfig =
   | MqttConnectionConfig
   | WebhookConnectionConfig
   | WebSocketConnectionConfig
+  | FileConnectionConfig
 
 // --- Connection status ---
 

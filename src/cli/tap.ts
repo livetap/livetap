@@ -29,9 +29,16 @@ export async function run(args: string[]) {
     config = parseMqttUri(source)
   } else if (source.startsWith('ws://') || source.startsWith('wss://')) {
     config = { type: 'websocket', url: source }
+  } else if (source.startsWith('file://')) {
+    const path = source.slice(7) // strip file://
+    if (!path.startsWith('/')) {
+      console.error('file:// path must be absolute (e.g. file:///var/log/app.log)')
+      process.exit(1)
+    }
+    config = { type: 'file', path }
   } else {
     console.error(`Unknown source format: ${source}`)
-    console.error('Expected: mqtt://..., wss://..., webhook, or a .json file')
+    console.error('Expected: mqtt://..., wss://..., file:///path, webhook, or a .json file')
     process.exit(1)
   }
 
@@ -82,5 +89,6 @@ function parseMqttUri(uri: string): any {
 function summarize(config: any): string {
   if (config.type === 'mqtt') return `${config.broker}/${config.topics?.[0] ?? ''}`
   if (config.type === 'websocket') return config.url
+  if (config.type === 'file') return config.path
   return 'webhook ingest'
 }

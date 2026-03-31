@@ -17,7 +17,7 @@ export const TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        type: { type: 'string', enum: ['mqtt', 'webhook', 'websocket'], description: 'Source type', default: 'mqtt' },
+        type: { type: 'string', enum: ['mqtt', 'webhook', 'websocket', 'file'], description: 'Source type', default: 'mqtt' },
         name: { type: 'string', description: 'Display name for the connection' },
         broker: { type: 'string', description: 'MQTT broker hostname (required for mqtt)' },
         port: { type: 'number', description: 'Broker port (default 1883 for mqtt)', default: 1883 },
@@ -28,6 +28,7 @@ export const TOOLS = [
         url: { type: 'string', description: 'WebSocket URL (required for websocket)' },
         headers: { type: 'object', description: 'WebSocket auth headers' },
         handshake: { type: 'string', description: 'Message to send after WS connect (e.g. subscription JSON)' },
+        path: { type: 'string', description: 'Absolute file path to tail (required for file type, e.g. "/var/log/app.log")' },
       },
     },
   },
@@ -207,6 +208,10 @@ export function registerTools(server: Server, daemonUrl: string) {
             if (args?.headers) config.headers = args.headers
             if (args?.handshake) config.handshake = args.handshake
             if (!config.url) return error('Error: url is required for websocket connections')
+          } else if (config.type === 'file') {
+            config.path = args?.path
+            if (!config.path) return error('Error: path is required for file connections (e.g. "/var/log/app.log")')
+            if (!config.path.startsWith('/')) return error('Error: file path must be absolute')
           }
           // webhook needs no extra params
           const res = await fetch(`${daemonUrl}/connections`, {

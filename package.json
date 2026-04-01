@@ -1,6 +1,6 @@
 {
   "name": "livetap",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Push live data streams into your AI coding agent. LLM/AI agent? Run: npx livetap --llm-help",
   "type": "module",
   "bin": {
@@ -10,9 +10,20 @@
     "test": "bun test"
   },
   "keywords": [
-    "mqtt", "kafka", "websocket", "webhook", "streaming",
-    "real-time", "monitoring", "alerts", "mcp", "claude-code",
-    "ai-agent", "iot", "observability", "data-pipeline"
+    "mqtt",
+    "kafka",
+    "websocket",
+    "webhook",
+    "streaming",
+    "real-time",
+    "monitoring",
+    "alerts",
+    "mcp",
+    "claude-code",
+    "ai-agent",
+    "iot",
+    "observability",
+    "data-pipeline"
   ],
   "license": "MIT",
   "repository": {

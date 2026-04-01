@@ -169,6 +169,14 @@ export const TOOLS = [
       required: ['watcherId'],
     },
   },
+  {
+    name: 'status',
+    description: 'Get daemon status: uptime, port, active connections and watchers count.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+    },
+  },
 ]
 
 function text(content: string) {
@@ -180,8 +188,34 @@ function error(content: string) {
 }
 
 /**
+ * Try to start the daemon via CLI. Returns true if daemon becomes healthy.
+ */
+async function tryStartDaemon(daemonUrl: string): Promise<boolean> {
+  const startScript = new URL('../../bin/livetap.ts', import.meta.url).pathname
+  const port = new URL(daemonUrl).port || '8788'
+  const proc = Bun.spawn(['bun', startScript, 'start'], {
+    env: { ...process.env, LIVETAP_PORT: port },
+    stdout: 'ignore',
+    stderr: 'ignore',
+  })
+  proc.unref()
+
+  // Wait up to 15s for daemon to be ready
+  const deadline = Date.now() + 15_000
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${daemonUrl}/status`)
+      if (res.ok) return true
+    } catch { /* not ready */ }
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  return false
+}
+
+/**
  * Register all livetap MCP tools on the given server.
  * Tools proxy to the daemon HTTP API at the given base URL.
+ * Includes auto-restart + retry on connection failure.
  */
 export function registerTools(server: Server, daemonUrl: string) {
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -304,11 +338,40 @@ export function registerTools(server: Server, daemonUrl: string) {
           return text(await res.text())
         }
 
+        case 'status': {
+          const res = await fetch(`${daemonUrl}/status`)
+          if (!res.ok) return error('Daemon not reachable')
+          const status = await res.json()
+          // Also fetch watcher count
+          let watcherCount = 0
+          try {
+            const wr = await fetch(`${daemonUrl}/watchers`)
+            if (wr.ok) {
+              const watchers = await wr.json()
+              watcherCount = watchers.length
+            }
+          } catch { /* ok */ }
+          return text(JSON.stringify({ ...status, watcherCount }, null, 2))
+        }
+
         default:
           return error(`Unknown tool: ${name}`)
       }
     } catch (err) {
-      return error(`livetap daemon error: ${(err as Error).message}. Is the daemon running?`)
+      // Connection failed — try to auto-start daemon and retry
+      const msg = (err as Error).message
+      if (msg.includes('Unable to connect') || msg.includes('ECONNREFUSED') || msg.includes('fetch failed')) {
+        const started = await tryStartDaemon(daemonUrl)
+        if (!started) {
+          return error('livetap daemon could not be started. Run "livetap start" manually.')
+        }
+        // Retry: simple fetch to /status to confirm, then tell agent to retry
+        return text(JSON.stringify({
+          note: 'Daemon was restarted. Please retry your request.',
+          status: 'daemon_restarted',
+        }))
+      }
+      return error(`livetap daemon error: ${msg}`)
     }
   })
 }

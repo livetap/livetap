@@ -21,7 +21,7 @@ const DAEMON_URL = `http://127.0.0.1:${DAEMON_PORT}`
 
 const INSTRUCTIONS = generateInstructions()
 
-async function waitForDaemon(maxWaitMs = 10_000): Promise<boolean> {
+async function waitForDaemon(maxWaitMs = 30_000): Promise<boolean> {
   const deadline = Date.now() + maxWaitMs
   while (Date.now() < deadline) {
     try {
@@ -40,10 +40,10 @@ async function autoStartDaemon(): Promise<boolean> {
     if (res.ok) return true
   } catch { /* not running */ }
 
-  // Auto-start the daemon — resolve path relative to this file, not CWD
-  const daemonPath = new URL('../server/index.ts', import.meta.url).pathname
-  console.error(`[livetap-mcp] Daemon not running, auto-starting from ${daemonPath}...`)
-  const proc = Bun.spawn(['bun', daemonPath], {
+  // Auto-start via CLI (single code path — resolves paths correctly from any CWD)
+  const startScript = new URL('../../bin/livetap.ts', import.meta.url).pathname
+  console.error('[livetap-mcp] Daemon not running, auto-starting...')
+  const proc = Bun.spawn(['bun', startScript, 'start'], {
     env: { ...process.env, LIVETAP_PORT: String(DAEMON_PORT) },
     stdout: 'ignore',
     stderr: 'ignore',
@@ -91,8 +91,7 @@ async function connectToSSE(mcp: Server) {
       }
     }
   } catch {
-    // SSE connection failed — daemon may not support /events yet (Phase 3)
-    // Silently retry after delay
+    // SSE connection failed — retry after delay
     setTimeout(() => connectToSSE(mcp), 5000)
   }
 }
@@ -100,7 +99,7 @@ async function connectToSSE(mcp: Server) {
 async function main() {
   const daemonReady = await autoStartDaemon()
   if (!daemonReady) {
-    console.error('[livetap-mcp] WARNING: Could not connect to daemon. Tools may fail.')
+    console.error('[livetap-mcp] WARNING: Could not connect to daemon. Tools will auto-retry on first call.')
   }
 
   const mcp = new Server(

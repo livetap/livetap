@@ -2,45 +2,32 @@
  * livetap stop — Stop the daemon.
  */
 
-import { resolve } from 'path'
-import { homedir } from 'os'
-import { existsSync, readFileSync, unlinkSync } from 'fs'
-import { isDaemonRunning, getDaemonUrl } from './daemon-client.js'
-
-const STATE_PATH = resolve(homedir(), '.livetap', 'state.json')
+import { isDaemonRunning, readPid, isPidAlive, cleanPidFile, getDaemonPort } from './daemon-client.js'
 
 export async function run(_args: string[]) {
-  if (!(await isDaemonRunning())) {
-    // Try reading PID from state file
-    if (existsSync(STATE_PATH)) {
-      try {
-        const state = JSON.parse(readFileSync(STATE_PATH, 'utf-8'))
-        try { process.kill(state.pid, 'SIGTERM') } catch { /* already dead */ }
-        unlinkSync(STATE_PATH)
-        console.log('livetap daemon stopped (cleaned up stale state)')
-      } catch {
-        unlinkSync(STATE_PATH)
-      }
-    } else {
-      console.log('livetap is not running.')
-    }
+  const pid = readPid()
+  const running = await isDaemonRunning()
+
+  if (!running && !pid) {
+    console.log('livetap is not running.')
     return
   }
 
-  // Read state for PID
-  let pid: number | undefined
-  if (existsSync(STATE_PATH)) {
-    try {
-      const state = JSON.parse(readFileSync(STATE_PATH, 'utf-8'))
-      pid = state.pid
-    } catch { /* malformed */ }
+  if (!running && pid) {
+    // PID file exists but daemon isn't responding
+    if (isPidAlive(pid)) {
+      // Process exists but not responding on port — might be something else
+      console.log(`Warning: PID ${pid} exists but daemon is not responding on :${getDaemonPort()}`)
+      try { process.kill(pid, 'SIGTERM') } catch { /* ok */ }
+    }
+    cleanPidFile()
+    console.log('livetap daemon stopped (cleaned up stale state)')
+    return
   }
 
-  // Send SIGTERM
+  // Daemon is running — send SIGTERM via PID or wait for port to close
   if (pid) {
-    try {
-      process.kill(pid, 'SIGTERM')
-    } catch { /* already gone */ }
+    try { process.kill(pid, 'SIGTERM') } catch { /* already gone */ }
   }
 
   // Wait for shutdown
@@ -55,10 +42,6 @@ export async function run(_args: string[]) {
     if (pid) try { process.kill(pid, 'SIGKILL') } catch { /* ok */ }
   }
 
-  // Clean up state
-  if (existsSync(STATE_PATH)) {
-    try { unlinkSync(STATE_PATH) } catch { /* ok */ }
-  }
-
+  cleanPidFile()
   console.log('livetap daemon stopped')
 }

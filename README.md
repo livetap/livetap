@@ -15,10 +15,10 @@ Connect MQTT brokers, WebSocket feeds, or tail log files. Your agent samples, wa
 bun add livetap
 ```
 
-Start the daemon and Claude Code:
+Set up and start Claude Code:
 
 ```bash
-livetap start
+livetap setup
 claude --dangerously-load-development-channels server:livetap
 ```
 
@@ -34,7 +34,7 @@ Quick version:
 
 ```bash
 npm install livetap          # Step 1: install
-npx livetap setup            # Step 2: creates .mcp.json
+npx livetap setup            # Step 2: creates .mcp.json and starts daemon
 # Step 3: tell user to restart Claude Code with:
 #   claude --dangerously-load-development-channels server:livetap --continue
 ```
@@ -42,12 +42,12 @@ npx livetap setup            # Step 2: creates .mcp.json
 **IMPORTANT — do NOT:**
 - Add livetap to `~/.claude/mcp.json` — it goes in `.mcp.json` in the project root
 - Configure livetap as `type: "http"` — it is a stdio MCP server (command + args)
-- Start the daemon manually — the MCP proxy auto-starts it on Claude restart
+- Worry about the daemon — setup starts it, and the MCP proxy auto-starts it if needed
 - Guess field names — always `read_stream` first to see actual payload structure
 
 ### After restart — use MCP tools
 
-Once restarted with the channel flag, you have 12 MCP tools available. Follow this workflow:
+Once restarted with the channel flag, you have 13 MCP tools available. Follow this workflow:
 
 1. **CONNECT** — `create_connection({ type: "mqtt", broker: "broker.emqx.io", port: 1883, tls: false, topics: ["justinx/demo/#"] })`
 2. **SAMPLE** — `read_stream({ connectionId: "conn_xxx", backfillSeconds: 60, maxEntries: 10 })` — ALWAYS sample first to see field paths
@@ -74,7 +74,7 @@ Once restarted with the channel flag, you have 12 MCP tools available. Follow th
 
 ### If the daemon is not running
 
-The MCP proxy auto-starts the daemon. If it fails, run:
+The daemon auto-starts on setup and on MCP proxy init, and retries on failed requests. If it still fails, run:
 ```bash
 livetap start
 ```
@@ -139,7 +139,7 @@ Agent: Taps the file, samples to see log format, creates regex watcher
 
 ```bash
 # Daemon
-livetap start                                    # Start daemon (HTTP API)
+livetap start                                    # Start daemon (auto-started by setup)
 livetap stop                                     # Stop
 livetap status                                   # Dashboard
 
@@ -176,7 +176,7 @@ livetap unwatch <watcherId>                                  # Remove
 
 ## MCP tools
 
-livetap exposes 12 MCP tools that your agent uses automatically:
+livetap exposes 13 MCP tools that your agent uses automatically:
 
 | Tool | What it does |
 |------|-------------|
@@ -192,6 +192,7 @@ livetap exposes 12 MCP tools that your agent uses automatically:
 | `update_watcher` | Change conditions or cooldown |
 | `delete_watcher` | Remove a watcher |
 | `restart_watcher` | Restart a stopped watcher |
+| `status` | Daemon health, uptime, connections, and watchers summary |
 
 ## Expression watchers
 
@@ -232,7 +233,7 @@ The agent knows field paths differ by source:
 
 **Daemon port:** Default `:8788`. Override with `--port` or `LIVETAP_PORT` env var.
 
-**State directory:** `~/.livetap/` stores daemon PID, logs, and watcher evaluation logs.
+**State directory:** `~/.livetap/` stores `daemon.pid`, daemon logs, and watcher evaluation logs.
 
 **MCP config:** `.mcp.json` in your project root:
 ```json

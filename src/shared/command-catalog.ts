@@ -26,7 +26,7 @@ export const CLI_COMMANDS: CatalogCommand[] = [
   {
     name: 'setup',
     usage: 'livetap setup',
-    description: 'Configure .mcp.json for Claude Code and print restart instructions. Run this after npm install.',
+    description: 'Configure .mcp.json, start the daemon, and print restart instructions. Run this after npm install.',
   },
   // --- Daemon ---
   {

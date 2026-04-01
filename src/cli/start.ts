@@ -4,12 +4,10 @@
 
 import { resolve } from 'path'
 import { homedir } from 'os'
-import { mkdirSync, writeFileSync, existsSync } from 'fs'
-import { isDaemonRunning, getDaemonUrl } from './daemon-client.js'
+import { mkdirSync, writeFileSync } from 'fs'
+import { isDaemonRunning, getDaemonUrl, getDaemonPort, PID_PATH, STATE_DIR } from './daemon-client.js'
 
-const STATE_DIR = resolve(homedir(), '.livetap')
 const LOG_DIR = resolve(STATE_DIR, 'logs')
-const STATE_PATH = resolve(STATE_DIR, 'state.json')
 
 export async function run(args: string[]) {
   const foreground = args.includes('--foreground') || args.includes('-f')
@@ -29,21 +27,20 @@ export async function run(args: string[]) {
 
   if (foreground) {
     console.log('Starting livetap in foreground...')
-    // Import and run directly
     await import('../server/index.js')
     return
   }
 
   // Background: spawn detached
-  const port = process.env.LIVETAP_PORT || '8788'
-  const logFile = Bun.file(resolve(LOG_DIR, 'daemon.log'))
-  const logFd = logFile.writer()
+  const port = String(getDaemonPort())
+  const daemonEntry = resolve(import.meta.dir, '../server/index.ts')
 
-  const proc = Bun.spawn(['bun', resolve(import.meta.dir, '../server/index.ts')], {
+  const proc = Bun.spawn(['bun', daemonEntry], {
     env: { ...process.env, LIVETAP_PORT: port },
     stdout: 'ignore',
     stderr: 'ignore',
   })
+  proc.unref()
 
   // Wait for it to be ready
   const deadline = Date.now() + 15_000
@@ -52,12 +49,7 @@ export async function run(args: string[]) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/status`)
       if (res.ok) {
-        const data = await res.json()
-        writeFileSync(STATE_PATH, JSON.stringify({
-          pid: proc.pid,
-          port: parseInt(port),
-          startedAt: new Date().toISOString(),
-        }, null, 2))
+        writeFileSync(PID_PATH, String(proc.pid))
         ready = true
         break
       }

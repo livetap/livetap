@@ -245,6 +245,58 @@ Every user/agent-facing surface must reflect the new daemon lifecycle:
 | `src/shared/catalog-generators.ts` | Update --llm-help Step 2: "setup creates .mcp.json AND starts daemon". Remove do_not rule "Do NOT start the daemon manually". Add "daemon auto-heals" note. Add status tool to MCP instructions. |
 | `README.md` | Update quick start (remove manual `livetap start` step). Update "if daemon is not running" section. Update requirements (just Bun + Claude Code). |
 | `CONTRIBUTING.md` | Update architecture description for daemon lifecycle. |
+| `src/cli/daemon-client.ts` | Update STATE_PATH for PID file, error message mention `setup` as alternative |
+
+### 1H detail: Complete text surface checklist (28 items)
+
+**README.md (9 items):**
+1. Lines 18-23: Quick start `livetap start` → `livetap setup`
+2. Line 37: Setup step comment → add "and starts daemon"
+3. Line 45: Remove "Do NOT start the daemon manually"
+4. Line 50: `12 MCP tools` → `13 MCP tools`
+5. Lines 76-80: Mention retry behavior in auto-start section
+6. Line 142: CLI comment → `# Start daemon (auto-started by setup/MCP)`
+7. Line 179: `12 MCP tools` → `13 MCP tools`
+8. After line 194: Add `status` row to MCP tools table
+9. Line 235: Mention `daemon.pid` in state directory
+
+**catalog-generators.ts (4 items):**
+10. Line 64: Step 2 add "and starts the daemon"
+11. Line 71: Rewrite "Do NOT start daemon manually" rule
+12. ~Line 143: Add tip about auto-start/retry to MCP instructions
+13. ~Line 113: Add `status` tool to MANAGE section
+
+**command-catalog.ts (1 item):**
+14. Line 29: `setup` description add "start the daemon"
+
+**tools.ts (3 items):**
+15. After line 171: Add 13th `status` tool definition
+16. Line 311: Error message mention auto-restart
+17. Lines 191-313: Add `case 'status'` handler
+
+**channel.ts (3 items):**
+18. Lines 43-51: Auto-start via `npx livetap start`
+19. Line 45: Simplify log message
+20. Line 94: Remove stale "Phase 3" comment
+
+**setup.ts (2 items):**
+21. Lines 63-69: Add daemon start + spinner + success message
+22. Line 2: Docstring add "starts the daemon"
+
+**start.ts (2 items):**
+23. Line 56: Write `daemon.pid` instead of `state.json`
+24. Line 46: Add `proc.unref()`
+
+**stop.ts (2 items):**
+25. Line 10: `STATE_PATH` → `PID_PATH` (daemon.pid)
+26. Lines 15-28: Read PID from daemon.pid
+
+**status.ts (1 item):**
+27. Lines 24-35: Add watcher count to output
+
+**daemon-client.ts (2 items):**
+28. Line 9: Update STATE_PATH for daemon.pid
+29. Line 35: Error message mention `setup` as alternative
 
 ---
 

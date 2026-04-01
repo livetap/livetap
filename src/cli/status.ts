@@ -2,11 +2,16 @@
  * livetap status — Show daemon, connections, and watchers.
  */
 
-import { isDaemonRunning, daemonJson } from './daemon-client.js'
+import { isDaemonRunning, daemonJson, readPid } from './daemon-client.js'
 
 export async function run(args: string[]) {
   if (!(await isDaemonRunning())) {
-    console.log('livetap is not running. Use "livetap start" to begin.')
+    const pid = readPid()
+    if (pid) {
+      console.log(`livetap daemon is not responding (stale PID ${pid}). Try "livetap start".`)
+    } else {
+      console.log('livetap is not running. Use "livetap start" or "livetap setup" to begin.')
+    }
     return
   }
 
@@ -33,6 +38,20 @@ export async function run(args: string[]) {
     }
     console.log()
   }
+
+  // Fetch watcher count
+  try {
+    const watchers = await daemonJson('/watchers')
+    if (watchers.length > 0) {
+      const running = watchers.filter((w: any) => w.status === 'running').length
+      console.log(`Watchers (${watchers.length}, ${running} running)`)
+      for (const w of watchers) {
+        const expr = w.conditions?.map((c: any) => `${c.field} ${c.op} ${c.value}`).join(w.match === 'all' ? ' AND ' : ' OR ') ?? ''
+        console.log(`  ${w.id}  ${w.status.padEnd(8)} ${expr.slice(0, 50)}`)
+      }
+      console.log()
+    }
+  } catch { /* no watchers endpoint or error */ }
 }
 
 function formatUptime(seconds: number): string {

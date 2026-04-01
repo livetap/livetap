@@ -32,7 +32,7 @@ export const CLI_COMMANDS: CatalogCommand[] = [
   {
     name: 'start',
     usage: 'livetap start',
-    description: 'Start the livetap daemon (embedded Redis + HTTP API)',
+    description: 'Start the livetap daemon (HTTP API)',
     flags: [
       { name: '--port', type: 'number', default: 8788, description: 'Daemon port (env: LIVETAP_PORT)' },
       { name: '--foreground', type: 'boolean', description: 'Run in foreground (don\'t detach)' },

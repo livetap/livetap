@@ -9,13 +9,13 @@ bun install
 bun test
 ```
 
-**Requirements:** Bun 1.0+, Redis (`brew install redis`)
+**Requirements:** Bun 1.0+
 
 ## Architecture
 
 livetap has two processes:
 
-- **Daemon** (`src/server/index.ts`) — background process on :8788 with embedded Redis, manages connections and watchers
+- **Daemon** (`src/server/index.ts`) — background process on :8788 with in-memory stream buffer, manages connections and watchers
 - **MCP proxy** (`src/mcp/channel.ts`) — thin stdio proxy spawned by Claude Code, proxies tools to daemon, pushes channel alerts
 
 Key modules:

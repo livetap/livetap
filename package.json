@@ -28,9 +28,7 @@
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
-    "ioredis": "^5.10.1",
-    "mqtt": "^5.15.1",
-    "redis-server": "^1.2.2"
+    "mqtt": "^5.15.1"
   },
   "devDependencies": {
     "@types/bun": "latest"

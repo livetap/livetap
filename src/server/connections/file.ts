@@ -1,18 +1,18 @@
 /**
  * File Tailing Subscriber — watches a file for new lines (tail -f behavior)
- * and writes each line to a Redis Stream with rolling retention.
+ * and writes each line to a stream with rolling retention.
  * Auto-detects JSON vs plain text per line.
  */
 
 import { watch, type FSWatcher } from 'fs'
 import { open, stat, type FileHandle } from 'fs/promises'
-import type Redis from 'ioredis'
+import type { StreamStore } from '../stream-store.js'
 import type { FileConnectionConfig, Subscriber, ConnectionStatus } from '../types.js'
 
 export interface FileSubscriberOpts {
   config: FileConnectionConfig
   streamKey: string
-  redis: Redis
+  store: StreamStore
   retentionMs?: number
   onMessage?: () => void
 }
@@ -20,7 +20,7 @@ export interface FileSubscriberOpts {
 export class FileSubscriber implements Subscriber {
   private config: FileConnectionConfig
   private streamKey: string
-  private redis: Redis
+  private store: StreamStore
   private retentionMs: number
   private onMessage: (() => void) | undefined
   private state: ConnectionStatus['runtimeState'] = 'disconnected'
@@ -35,7 +35,7 @@ export class FileSubscriber implements Subscriber {
   constructor(opts: FileSubscriberOpts) {
     this.config = opts.config
     this.streamKey = opts.streamKey
-    this.redis = opts.redis
+    this.store = opts.store
     this.retentionMs = opts.retentionMs ?? 5 * 60 * 1000
     this.onMessage = opts.onMessage
   }
@@ -98,9 +98,8 @@ export class FileSubscriber implements Subscriber {
           fields = { payload: line, format: 'text' }
         }
 
-        await this.redis.xadd(this.streamKey, '*', ...Object.entries(fields).flat())
-        const minId = Date.now() - this.retentionMs
-        await this.redis.xtrim(this.streamKey, 'MINID', '~', minId.toString())
+        this.store.append(this.streamKey, fields)
+        this.store.trim(this.streamKey, Date.now() - this.retentionMs)
         this.onMessage?.()
       }
     } catch (err) {

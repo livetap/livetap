@@ -9,7 +9,7 @@ Connect MQTT brokers, WebSocket feeds, or tail log files. Your agent samples, wa
 
 ## Quick start
 
-**Requirements:** [Bun](https://bun.sh), [Redis](https://redis.io/) (`brew install redis`), Claude Code v2.1.80+
+**Requirements:** [Bun](https://bun.sh), Claude Code v2.1.80+
 
 ```bash
 bun add livetap
@@ -81,10 +81,10 @@ livetap start
 
 ## What it does
 
-livetap runs a background daemon that connects to live data sources, buffers messages in embedded Redis, and pushes alerts into your Claude Code session via the [Channels API](https://code.claude.com/docs/en/channels). Your agent sees the data in real-time and can create expression-based watchers that fire when conditions match.
+livetap runs a background daemon that connects to live data sources, buffers messages in memory, and pushes alerts into your Claude Code session via the [Channels API](https://code.claude.com/docs/en/channels). Your agent sees the data in real-time and can create expression-based watchers that fire when conditions match.
 
 ```
-Source (MQTT/WS/File) ──> Subscriber ──> Redis Stream ──> Watcher Engine
+Source (MQTT/WS/File) ──> Subscriber ──> StreamStore ──> Watcher Engine
                                               |                 |
                                               v                 v (on match)
                                          read_stream        Channel Alert
@@ -139,7 +139,7 @@ Agent: Taps the file, samples to see log format, creates regex watcher
 
 ```bash
 # Daemon
-livetap start                                    # Start (embedded Redis + API)
+livetap start                                    # Start daemon (HTTP API)
 livetap stop                                     # Stop
 livetap status                                   # Dashboard
 

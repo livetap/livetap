@@ -157,6 +157,75 @@ test('get watcher logs shows MATCH entry', async () => {
   expect(data.logs.some((l: string) => l.includes('STARTED'))).toBe(true)
 })
 
+test('watcher matches plain number payload with regex', async () => {
+  // Create a watcher that uses regex on payload (plain number, not JSON object)
+  const res = await fetch(`${BASE}/watchers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      connectionId: connId,
+      conditions: [{ field: 'payload', op: 'matches', value: '^[89]' }],
+      match: 'all',
+      cooldown: 0,
+    }),
+  })
+  expect(res.status).toBe(201)
+  const watcher = await res.json()
+
+  await new Promise((r) => setTimeout(r, 500))
+
+  // Push a plain number that starts with 8 (JSON.parse succeeds → number primitive)
+  await fetch(ingestUrl, {
+    method: 'POST',
+    body: '8536872097.73',
+  })
+  // Push one that doesn't match
+  await fetch(ingestUrl, {
+    method: 'POST',
+    body: '1234567890.0',
+  })
+  // Push one starting with 9
+  await fetch(ingestUrl, {
+    method: 'POST',
+    body: '9100000000.5',
+  })
+
+  await new Promise((r) => setTimeout(r, 1500))
+
+  const info = await (await fetch(`${BASE}/watchers/${watcher.id}`)).json()
+  expect(info.matchCount).toBe(2) // 8B and 9B matched, 1B didn't
+
+  await fetch(`${BASE}/watchers/${watcher.id}`, { method: 'DELETE' })
+})
+
+test('watcher matches plain number payload with numeric comparison', async () => {
+  const res = await fetch(`${BASE}/watchers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      connectionId: connId,
+      conditions: [{ field: 'payload', op: '>=', value: 8000000000 }],
+      match: 'all',
+      cooldown: 0,
+    }),
+  })
+  expect(res.status).toBe(201)
+  const watcher = await res.json()
+
+  await new Promise((r) => setTimeout(r, 500))
+
+  await fetch(ingestUrl, { method: 'POST', body: '8536872097.73' }) // match
+  await fetch(ingestUrl, { method: 'POST', body: '3000000000.0' })  // no match
+  await fetch(ingestUrl, { method: 'POST', body: '9999999999.9' })  // match
+
+  await new Promise((r) => setTimeout(r, 1500))
+
+  const info = await (await fetch(`${BASE}/watchers/${watcher.id}`)).json()
+  expect(info.matchCount).toBe(2)
+
+  await fetch(`${BASE}/watchers/${watcher.id}`, { method: 'DELETE' })
+})
+
 test('delete watcher', async () => {
   const watchersList = await (await fetch(`${BASE}/watchers?connectionId=${connId}`)).json()
   const watcherId = watchersList[0].id

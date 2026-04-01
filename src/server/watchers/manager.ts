@@ -1,12 +1,12 @@
 /**
  * Watcher Manager — CRUD + evaluation loops for expression watchers.
- * Stores definitions in Redis hashes. Runs evaluator loops in-process.
+ * Stores definitions in-memory. Evaluates via StreamStore subscriptions.
  */
 
-import Redis from 'ioredis'
 import { mkdirSync, appendFileSync, statSync, writeFileSync, readFileSync, unlinkSync } from 'fs'
 import { resolve } from 'path'
 import { homedir } from 'os'
+import type { StreamStore, StreamEntry } from '../stream-store.js'
 import type { WatcherCondition, WatcherDefinition, WatcherInfo, WatcherAlert, WatcherAction } from './types.js'
 import { VALID_OPS } from './types.js'
 import { evaluateWatcher, extractMatchedValues, formatExpression } from './engine.js'
@@ -24,15 +24,13 @@ const MAX_LOG_SIZE = 512 * 1024 // 512KB
 export type AlertCallback = (alert: WatcherAlert) => void
 
 export class WatcherManager {
-  private redisUrl: string
-  private loops = new Map<string, { abort: AbortController; reader: Redis }>()
+  private store: StreamStore
+  private subscriptions = new Map<string, () => void>() // watcherId → unsubscribe
   private info = new Map<string, WatcherInfo>()
   private onAlert: AlertCallback
-  private redis: Redis
 
-  constructor(redis: Redis, redisUrl: string, onAlert: AlertCallback) {
-    this.redis = redis
-    this.redisUrl = redisUrl
+  constructor(store: StreamStore, onAlert: AlertCallback) {
+    this.store = store
     this.onAlert = onAlert
     mkdirSync(LOG_DIR, { recursive: true })
   }
@@ -72,9 +70,6 @@ export class WatcherManager {
       createdAt: now,
       updatedAt: now,
     }
-
-    // Store in flat hash (globally unique watcher IDs)
-    await this.redis.hset('livetap:watchers', id, JSON.stringify(def))
 
     const info: WatcherInfo = { ...def, matchCount: 0, entriesChecked: 0 }
     this.info.set(id, info)
@@ -135,10 +130,6 @@ export class WatcherManager {
     info.updatedAt = new Date().toISOString()
     info.status = 'running'
 
-    // Persist
-    const def: WatcherDefinition = { ...info }
-    await this.redis.hset('livetap:watchers', watcherId, JSON.stringify(def))
-
     this.writeLog(watcherId, `UPDATED conditions=${formatExpression(info.conditions, info.match)} cooldown=${info.cooldown}s`)
     this.startLoop(watcherId, streamKey, info)
 
@@ -162,7 +153,6 @@ export class WatcherManager {
 
     this.stopLoop(watcherId)
     this.info.delete(watcherId)
-    await this.redis.hdel('livetap:watchers', watcherId)
 
     // Delete log file
     try { unlinkSync(resolve(LOG_DIR, `${watcherId}.log`)) } catch { /* ok */ }
@@ -178,114 +168,93 @@ export class WatcherManager {
   }
 
   private startLoop(watcherId: string, streamKey: string, def: WatcherDefinition) {
-    const abort = new AbortController()
-    const reader = new Redis(this.redisUrl)
-    this.loops.set(watcherId, { abort, reader })
-
     const info = this.info.get(watcherId)!
     let lastAlertTime = 0
     let checkpointTime = Date.now()
-    const fieldNotFoundThrottle = new Map<string, number>() // field → last logged time
+    const fieldNotFoundThrottle = new Map<string, number>()
 
-    const run = async () => {
-      let lastId = '$'
-      while (!abort.signal.aborted) {
+    const onEntry = (entry: StreamEntry) => {
+      try {
+        info.entriesChecked++
+        info.lastChecked = new Date().toISOString()
+
+        const fields = entry.fields
+
+        // Parse payload: use parsed JSON object if available, otherwise raw fields
+        let payload: any
         try {
-          const result = await reader.xread('BLOCK', 2000, 'STREAMS', streamKey, lastId)
-          if (!result || abort.signal.aborted) continue
+          const parsed = JSON.parse(fields.payload ?? '{}')
+          // Only use parsed result if it's an object (has addressable fields).
+          // Primitives (numbers, strings, booleans) fall through to raw fields
+          // so "payload" remains addressable for regex/contains/numeric conditions.
+          payload = (typeof parsed === 'object' && parsed !== null) ? parsed : fields
+        } catch {
+          // Not valid JSON — use raw fields as the payload
+          payload = fields
+        }
 
-          for (const [, entries] of result) {
-            for (const [id, fieldArray] of entries) {
-              lastId = id
-              info.entriesChecked++
-              info.lastChecked = new Date().toISOString()
-
-              // Parse fields
-              const fields: Record<string, string> = {}
-              for (let i = 0; i < fieldArray.length; i += 2) {
-                fields[fieldArray[i]] = fieldArray[i + 1]
-              }
-
-              // Parse payload: try JSON first, fall back to raw fields
-              let payload: any
-              try {
-                payload = JSON.parse(fields.payload ?? '{}')
-              } catch {
-                // Plain text — use raw Redis fields as the payload
-                // This allows conditions like { field: "payload", op: "contains", value: "ERROR" }
-                payload = fields
-              }
-
-              // Log missing fields (throttled: once per field per minute)
-              for (const c of def.conditions) {
-                const val = resolveDotPathImport(payload, c.field)
-                if (val === undefined) {
-                  const last = fieldNotFoundThrottle.get(c.field) ?? 0
-                  if (Date.now() - last > 60_000) {
-                    this.writeLog(watcherId, `FIELD_NOT_FOUND ${c.field} in entry ${id}`)
-                    fieldNotFoundThrottle.set(c.field, Date.now())
-                  }
-                }
-              }
-
-              // Evaluate
-              const matched = evaluateWatcher(payload, def)
-              if (matched) {
-                const now = Date.now()
-                if (now - lastAlertTime >= def.cooldown * 1000) {
-                  lastAlertTime = now
-                  info.matchCount++
-                  info.lastMatch = new Date().toISOString()
-
-                  const matchedValues = extractMatchedValues(payload, def.conditions)
-                  const expression = formatExpression(def.conditions, def.match)
-
-                  this.writeLog(watcherId, `MATCH ${Object.entries(matchedValues).map(([k, v]) => `${k}=${v}`).join(' ')} action=${typeof def.action === 'string' ? def.action : JSON.stringify(def.action)}`)
-
-                  const alert: WatcherAlert = {
-                    watcherId,
-                    connectionId: def.connectionId,
-                    expression,
-                    matchedValues,
-                    entry: fields,
-                    ts: now,
-                  }
-
-                  // Execute action
-                  await this.executeAction(def.action, alert)
-                  this.onAlert(alert)
-                } else {
-                  const remaining = Math.round((def.cooldown * 1000 - (Date.now() - lastAlertTime)) / 1000)
-                  this.writeLog(watcherId, `SUPPRESSED ${formatExpression(def.conditions, def.match)} (cooldown ${remaining}s remaining)`)
-                }
-              }
-
-              // Checkpoint every 5 minutes
-              if (Date.now() - checkpointTime > 5 * 60 * 1000) {
-                this.writeLog(watcherId, `CHECKPOINT entries_checked=${info.entriesChecked} matches=${info.matchCount}`)
-                checkpointTime = Date.now()
-              }
+        // Log missing fields (throttled: once per field per minute)
+        for (const c of def.conditions) {
+          const val = resolveDotPathImport(payload, c.field)
+          if (val === undefined) {
+            const last = fieldNotFoundThrottle.get(c.field) ?? 0
+            if (Date.now() - last > 60_000) {
+              this.writeLog(watcherId, `FIELD_NOT_FOUND ${c.field} in entry ${entry.id}`)
+              fieldNotFoundThrottle.set(c.field, Date.now())
             }
           }
-        } catch (err) {
-          if (!abort.signal.aborted) {
-            this.writeLog(watcherId, `ERROR ${(err as Error).message}`)
-            await new Promise((r) => setTimeout(r, 1000))
+        }
+
+        // Evaluate
+        const matched = evaluateWatcher(payload, def)
+        if (matched) {
+          const now = Date.now()
+          if (now - lastAlertTime >= def.cooldown * 1000) {
+            lastAlertTime = now
+            info.matchCount++
+            info.lastMatch = new Date().toISOString()
+
+            const matchedValues = extractMatchedValues(payload, def.conditions)
+            const expression = formatExpression(def.conditions, def.match)
+
+            this.writeLog(watcherId, `MATCH ${Object.entries(matchedValues).map(([k, v]) => `${k}=${v}`).join(' ')} action=${typeof def.action === 'string' ? def.action : JSON.stringify(def.action)}`)
+
+            const alert: WatcherAlert = {
+              watcherId,
+              connectionId: def.connectionId,
+              expression,
+              matchedValues,
+              entry: fields,
+              ts: now,
+            }
+
+            this.executeAction(def.action, alert)
+            this.onAlert(alert)
+          } else {
+            const remaining = Math.round((def.cooldown * 1000 - (Date.now() - lastAlertTime)) / 1000)
+            this.writeLog(watcherId, `SUPPRESSED ${formatExpression(def.conditions, def.match)} (cooldown ${remaining}s remaining)`)
           }
         }
+
+        // Checkpoint every 5 minutes
+        if (Date.now() - checkpointTime > 5 * 60 * 1000) {
+          this.writeLog(watcherId, `CHECKPOINT entries_checked=${info.entriesChecked} matches=${info.matchCount}`)
+          checkpointTime = Date.now()
+        }
+      } catch (err) {
+        this.writeLog(watcherId, `ERROR ${(err as Error).message}`)
       }
-      reader.disconnect()
     }
 
-    run()
+    const unsub = this.store.subscribe(streamKey, onEntry)
+    this.subscriptions.set(watcherId, unsub)
   }
 
   private stopLoop(watcherId: string) {
-    const loop = this.loops.get(watcherId)
-    if (loop) {
-      loop.abort.abort()
-      loop.reader.disconnect()
-      this.loops.delete(watcherId)
+    const unsub = this.subscriptions.get(watcherId)
+    if (unsub) {
+      unsub()
+      this.subscriptions.delete(watcherId)
     }
     const info = this.info.get(watcherId)
     if (info) info.status = 'stopped'
@@ -342,7 +311,7 @@ export class WatcherManager {
   }
 
   async stopAll() {
-    for (const id of this.loops.keys()) {
+    for (const id of this.subscriptions.keys()) {
       this.stopLoop(id)
     }
   }

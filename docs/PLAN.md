@@ -90,6 +90,35 @@ class StreamStore {
 
 **Total: 9 source files modified, 1 new, 1 deleted. 4 test files modified, 1 test deleted. 2 npm deps removed.**
 
+### Phase 0F: Update all Redis references in docs and code
+
+Dropping Redis changes the install requirements and architecture. These changes belong in THIS branch, not the separate docs PR.
+
+| File | Refs | Change |
+|------|------|--------|
+| `README.md` | 4 | Remove "Redis (`brew install redis`)" from requirements. Update architecture diagram: "Redis Stream" → "StreamStore". Update "What it does" section: "embedded Redis" → "in-memory stream buffer". |
+| `CONTRIBUTING.md` | 2 | Remove "Redis (`brew install redis`)" from requirements. |
+| `CLAUDE.md` | 1 | Remove "Bun.redis for Redis. Don't use ioredis." — no longer relevant. |
+| `src/cli/status.ts` | 1 | Remove Redis status line from output. |
+| `src/cli/start.ts` | 1 | Remove Redis reference from startup messaging. |
+| `src/shared/command-catalog.ts` | 1 | Remove Redis mention. |
+| `src/mcp/tools.ts` | 1 | "Redis stream" → "stream" in description. |
+| `memory/MEMORY.md` | multiple | Update project memory: remove Redis gotchas, update architecture, update requirements. |
+
+**New install requirements:**
+
+Before (v0.1.5):
+```
+Requirements: Bun, Redis (brew install redis), Claude Code v2.1.80+
+```
+
+After (v0.2):
+```
+Requirements: Bun, Claude Code v2.1.80+
+```
+
+`npm install livetap` is now fully self-contained. No system dependencies beyond Bun.
+
 ### What does NOT change
 
 - MCP proxy (`channel.ts`, `tools.ts`) — talks HTTP to daemon, never touches Redis
@@ -218,9 +247,10 @@ Add `status` to CLI_COMMANDS in `src/shared/command-catalog.ts`. Ensure MCP TOOL
 3. **Phase 0C:** Replace Redis in connection-manager and watchers/manager
 4. **Phase 0D:** Replace Redis in daemon index.ts, update tests, remove deps
 5. **Phase 0E:** Run full test suite, verify everything passes
-6. **Phase 1A-1C:** Daemon lifecycle (setup starts daemon, daemonize, PID file)
-7. **Phase 1D-1E:** MCP proxy fallback + tool retry
-8. **Phase 1F-1I:** Status tool, SSE reconnect, update docs/catalog
+6. **Phase 0F:** Update all Redis references in docs (README, CONTRIBUTING, CLAUDE.md, CLI, MCP tools, memory)
+7. **Phase 1A-1C:** Daemon lifecycle (setup starts daemon, daemonize, PID file)
+8. **Phase 1D-1E:** MCP proxy fallback + tool retry
+9. **Phase 1F-1I:** Status tool, SSE reconnect, update docs/catalog
 
 ---
 
@@ -257,7 +287,26 @@ Add `status` to CLI_COMMANDS in `src/shared/command-catalog.ts`. Ensure MCP TOOL
 
 ## Doc Fixes (Separate PR)
 
-22 issues found in docs audit. Saved to `.local/docs-audit.md`. Key HIGH issues:
-1. Version 0.1.4 hardcoded in channel.ts and catalog-generators.ts (package.json is 0.1.5)
-2. "brew install redis" in README/CONTRIBUTING — no longer needed after Phase 0
-3. Daemon auto-start uses relative path that breaks for npm installs (fixed by 1B)
+22 issues found in docs audit. Saved to `.local/docs-audit.md`.
+
+**Fixed by this branch (not separate PR):**
+- Issue 1/29: "brew install redis" in README/CONTRIBUTING → removed in Phase 0F
+- Issue 10: ioredis contradicts CLAUDE.md → both removed in Phase 0F
+- Issue 19: Daemon auto-start relative path → fixed by Phase 1B (all via CLI)
+
+**Fixed by Phase 1 of this branch:**
+- Issue 12: Version 0.1.4 hardcoded → read from package.json at runtime
+
+**Remaining for separate PR (16 issues):**
+- Issue 2: bun add vs npm install inconsistency
+- Issue 3: Branch name references
+- Issue 4: Webhooks status contradictions
+- Issue 5: README .mcp.json example placeholder
+- Issue 6-7: Missing CLI flags in README (--max, --back, --action)
+- Issue 8: Mixed MQTT topics in examples
+- Issue 9/30: Hardcoded test count "103"
+- Issue 13: --json vs --raw for sip
+- Issue 15: "Do NOT use npm init" possibly stale
+- Issue 20: .mcp.json "run" arg inconsistency
+- Issues 21-28: PLAN.0.1.5.md historical drift (low priority, archived)
+- README drift-prone content: consider building `scripts/generate-docs.ts`

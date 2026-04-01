@@ -19,8 +19,7 @@ export async function run(args: string[]) {
   }
 
   const uptime = formatUptime(data.uptime)
-  console.log(`livetap daemon running on :${data.port} (uptime ${uptime})`)
-  console.log(`Redis: localhost:${data.redisPort}\n`)
+  console.log(`livetap daemon running on :${data.port} (uptime ${uptime})\n`)
 
   const conns = data.connections || []
   if (conns.length === 0) {

@@ -1,16 +1,16 @@
 /**
  * MQTT Subscriber — connects to an MQTT broker and writes messages
- * to a Redis Stream with rolling retention.
+ * to a stream with rolling retention.
  */
 
 import mqtt from 'mqtt'
-import type Redis from 'ioredis'
+import type { StreamStore } from '../stream-store.js'
 import type { MqttConnectionConfig, Subscriber, ConnectionStatus } from '../types.js'
 
 export interface MqttSubscriberOpts {
   config: MqttConnectionConfig
   streamKey: string
-  redis: Redis
+  store: StreamStore
   retentionMs?: number
   onMessage?: () => void
 }
@@ -19,7 +19,7 @@ export class MqttSubscriber implements Subscriber {
   private client: mqtt.MqttClient | null = null
   private config: MqttConnectionConfig
   private streamKey: string
-  private redis: Redis
+  private store: StreamStore
   private retentionMs: number
   private onMessage: (() => void) | undefined
   private state: ConnectionStatus['runtimeState'] = 'disconnected'
@@ -28,7 +28,7 @@ export class MqttSubscriber implements Subscriber {
   constructor(opts: MqttSubscriberOpts) {
     this.config = opts.config
     this.streamKey = opts.streamKey
-    this.redis = opts.redis
+    this.store = opts.store
     this.retentionMs = opts.retentionMs ?? 5 * 60 * 1000
     this.onMessage = opts.onMessage
   }
@@ -77,14 +77,13 @@ export class MqttSubscriber implements Subscriber {
         this.state = 'reconnecting'
       })
 
-      this.client!.on('message', async (topic, payload) => {
+      this.client!.on('message', (topic, payload) => {
         try {
-          await this.redis.xadd(this.streamKey, '*', 'topic', topic, 'payload', payload.toString())
-          const minId = Date.now() - this.retentionMs
-          await this.redis.xtrim(this.streamKey, 'MINID', '~', minId.toString())
+          this.store.append(this.streamKey, { topic, payload: payload.toString() })
+          this.store.trim(this.streamKey, Date.now() - this.retentionMs)
           this.onMessage?.()
         } catch {
-          // Redis write failure — log but don't crash
+          // Write failure — log but don't crash
         }
       })
     })

@@ -1,15 +1,15 @@
 /**
  * WebSocket Subscriber — connects to a remote WebSocket and writes
- * messages to a Redis Stream with rolling retention + reconnection.
+ * messages to a stream with rolling retention + reconnection.
  */
 
-import type Redis from 'ioredis'
+import type { StreamStore } from '../stream-store.js'
 import type { WebSocketConnectionConfig, Subscriber, ConnectionStatus } from '../types.js'
 
 export interface WsSubscriberOpts {
   config: WebSocketConnectionConfig
   streamKey: string
-  redis: Redis
+  store: StreamStore
   retentionMs?: number
   onMessage?: () => void
 }
@@ -18,7 +18,7 @@ export class WsSubscriber implements Subscriber {
   private ws: WebSocket | null = null
   private config: WebSocketConnectionConfig
   private streamKey: string
-  private redis: Redis
+  private store: StreamStore
   private retentionMs: number
   private onMessage: (() => void) | undefined
   private state: ConnectionStatus['runtimeState'] = 'disconnected'
@@ -31,7 +31,7 @@ export class WsSubscriber implements Subscriber {
   constructor(opts: WsSubscriberOpts) {
     this.config = opts.config
     this.streamKey = opts.streamKey
-    this.redis = opts.redis
+    this.store = opts.store
     this.retentionMs = opts.retentionMs ?? 5 * 60 * 1000
     this.onMessage = opts.onMessage
   }
@@ -65,15 +65,14 @@ export class WsSubscriber implements Subscriber {
       }
     }
 
-    this.ws.onmessage = async (event) => {
+    this.ws.onmessage = (event) => {
       try {
         const fields = this.parseMessage(event.data)
-        await this.redis.xadd(this.streamKey, '*', ...Object.entries(fields).flat())
-        const minId = Date.now() - this.retentionMs
-        await this.redis.xtrim(this.streamKey, 'MINID', '~', minId.toString())
+        this.store.append(this.streamKey, fields)
+        this.store.trim(this.streamKey, Date.now() - this.retentionMs)
         this.onMessage?.()
       } catch {
-        // Redis write failure
+        // Write failure
       }
     }
 

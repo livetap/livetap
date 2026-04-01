@@ -1,27 +1,27 @@
-import { test, expect, beforeAll, afterAll, beforeEach } from 'bun:test'
-import { startRedis, type RedisManager } from '../../src/server/redis.js'
+import { test, expect, beforeAll, afterAll } from 'bun:test'
+import { StreamStore } from '../../src/server/stream-store.js'
 import { ConnectionManager } from '../../src/server/connection-manager.js'
 import { writeFileSync, appendFileSync, mkdirSync, rmSync } from 'fs'
 import { resolve } from 'path'
 
 const TMP = resolve(import.meta.dir, '..', '..', '.tmp-file-test')
-let redis: RedisManager
+let store: StreamStore
 let manager: ConnectionManager
 
 beforeAll(async () => {
   rmSync(TMP, { recursive: true, force: true })
   mkdirSync(TMP, { recursive: true })
-  redis = await startRedis()
-  manager = new ConnectionManager(redis.client, redis.url)
+  store = new StreamStore()
+  manager = new ConnectionManager(store)
 })
 
 afterAll(async () => {
   await manager?.destroyAll()
-  await redis?.stop()
+  store?.stop()
   rmSync(TMP, { recursive: true, force: true })
 })
 
-test('tails new plain text lines into Redis', async () => {
+test('tails new plain text lines into stream', async () => {
   const logFile = resolve(TMP, 'app.log')
   writeFileSync(logFile, '') // create empty file
 
@@ -39,16 +39,12 @@ test('tails new plain text lines into Redis', async () => {
   // Wait for poll to pick up
   await new Promise((r) => setTimeout(r, 2000))
 
-  const entries = await redis.client.xrange(record.streamKey, '-', '+')
+  const entries = store.range(record.streamKey, 0)
   expect(entries.length).toBeGreaterThanOrEqual(3)
 
   // Verify format=text
-  const [, fields] = entries[0]
-  const fmtIdx = fields.indexOf('format')
-  expect(fields[fmtIdx + 1]).toBe('text')
-
-  const payIdx = fields.indexOf('payload')
-  expect(fields[payIdx + 1]).toBe('first log line')
+  expect(entries[0].fields.format).toBe('text')
+  expect(entries[0].fields.payload).toBe('first log line')
 
   await manager.destroy(record.id)
 })
@@ -65,16 +61,13 @@ test('tails JSON lines with format=json', async () => {
 
   await new Promise((r) => setTimeout(r, 2000))
 
-  const entries = await redis.client.xrange(record.streamKey, '-', '+')
+  const entries = store.range(record.streamKey, 0)
   expect(entries.length).toBeGreaterThanOrEqual(2)
 
   // First entry should be JSON format
-  const [, fields] = entries[0]
-  const fmtIdx = fields.indexOf('format')
-  expect(fields[fmtIdx + 1]).toBe('json')
+  expect(entries[0].fields.format).toBe('json')
 
-  const payIdx = fields.indexOf('payload')
-  const parsed = JSON.parse(fields[payIdx + 1])
+  const parsed = JSON.parse(entries[0].fields.payload)
   expect(parsed.level).toBe('ERROR')
   expect(parsed.msg).toBe('disk full')
 
@@ -89,19 +82,16 @@ test('ignores existing content (tail -f behavior)', async () => {
   await new Promise((r) => setTimeout(r, 1500))
 
   // Should have NO entries (old content ignored)
-  const entries = await redis.client.xrange(record.streamKey, '-', '+')
+  const entries = store.range(record.streamKey, 0)
   expect(entries.length).toBe(0)
 
   // Now append new content
   appendFileSync(logFile, 'new line after tap\n')
   await new Promise((r) => setTimeout(r, 2000))
 
-  const after = await redis.client.xrange(record.streamKey, '-', '+')
+  const after = store.range(record.streamKey, 0)
   expect(after.length).toBeGreaterThanOrEqual(1)
-
-  const [, fields] = after[0]
-  const payIdx = fields.indexOf('payload')
-  expect(fields[payIdx + 1]).toBe('new line after tap')
+  expect(after[0].fields.payload).toBe('new line after tap')
 
   await manager.destroy(record.id)
 })
@@ -116,7 +106,7 @@ test('skips empty lines', async () => {
   appendFileSync(logFile, 'real line\n\n\n\nanother real line\n')
   await new Promise((r) => setTimeout(r, 2000))
 
-  const entries = await redis.client.xrange(record.streamKey, '-', '+')
+  const entries = store.range(record.streamKey, 0)
   expect(entries.length).toBe(2) // only 2 non-empty lines
 
   await manager.destroy(record.id)
@@ -136,11 +126,11 @@ test('watcher with regex matches text log lines', async () => {
 
   await new Promise((r) => setTimeout(r, 2000))
 
-  const entries = await redis.client.xrange(record.streamKey, '-', '+')
+  const entries = store.range(record.streamKey, 0)
   expect(entries.length).toBeGreaterThanOrEqual(3)
 
   // Verify the ERROR line is there and matchable by regex
-  const payloads = entries.map(([, f]) => f[f.indexOf('payload') + 1])
+  const payloads = entries.map((e) => e.fields.payload)
   expect(payloads.some((p) => /\[ERROR\]/.test(p))).toBe(true)
   expect(payloads.some((p) => /\[INFO\]/.test(p))).toBe(true)
 

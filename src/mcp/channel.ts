@@ -37,13 +37,15 @@ async function autoStartDaemon(): Promise<boolean> {
     if (res.ok) return true
   } catch { /* not running */ }
 
-  // Auto-start the daemon
-  console.error('[livetap-mcp] Daemon not running, auto-starting...')
-  Bun.spawn(['bun', 'src/server/index.ts'], {
+  // Auto-start the daemon — resolve path relative to this file, not CWD
+  const daemonPath = new URL('../server/index.ts', import.meta.url).pathname
+  console.error(`[livetap-mcp] Daemon not running, auto-starting from ${daemonPath}...`)
+  const proc = Bun.spawn(['bun', daemonPath], {
     env: { ...process.env, LIVETAP_PORT: String(DAEMON_PORT) },
     stdout: 'ignore',
     stderr: 'ignore',
   })
+  proc.unref()
 
   return waitForDaemon()
 }

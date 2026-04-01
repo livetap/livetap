@@ -50,7 +50,7 @@ export const TOOLS = [
   },
   {
     name: 'destroy_connection',
-    description: 'Destroy a connection — stops the source subscriber, cleans up the Redis stream.',
+    description: 'Destroy a connection — stops the source subscriber, cleans up the stream buffer.',
     inputSchema: {
       type: 'object' as const,
       properties: {

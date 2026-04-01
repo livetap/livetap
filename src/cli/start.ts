@@ -56,7 +56,6 @@ export async function run(args: string[]) {
         writeFileSync(STATE_PATH, JSON.stringify({
           pid: proc.pid,
           port: parseInt(port),
-          redisPort: data.redisPort,
           startedAt: new Date().toISOString(),
         }, null, 2))
         ready = true

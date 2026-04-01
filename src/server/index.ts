@@ -3,7 +3,7 @@
  * Manages connections, streams, and watchers.
  */
 
-import { startRedis, type RedisManager } from './redis.js'
+import { StreamStore } from './stream-store.js'
 import { ConnectionManager } from './connection-manager.js'
 import { WatcherManager } from './watchers/manager.js'
 import type { WatcherAlert } from './watchers/types.js'
@@ -11,7 +11,7 @@ import type { StreamEntry } from './types.js'
 
 const PORT = parseInt(process.env.LIVETAP_PORT || '8788')
 
-let redis: RedisManager
+let store: StreamStore
 let manager: ConnectionManager
 let watchers: WatcherManager
 
@@ -26,11 +26,10 @@ function broadcastSSE(alert: WatcherAlert) {
 }
 
 async function boot() {
-  redis = await startRedis()
-  console.error(`[livetap] Redis started on port ${redis.port}`)
+  store = new StreamStore()
 
-  manager = new ConnectionManager(redis.client, redis.url)
-  watchers = new WatcherManager(redis.client, redis.url, broadcastSSE)
+  manager = new ConnectionManager(store)
+  watchers = new WatcherManager(store, broadcastSSE)
 
   Bun.serve({
     port: PORT,
@@ -60,7 +59,6 @@ async function boot() {
         return json({
           status: 'running',
           port: PORT,
-          redisPort: redis.port,
           connections: manager.list(),
           uptime: process.uptime(),
         })
@@ -128,7 +126,7 @@ async function boot() {
         const maxEntries = parseInt(url.searchParams.get('maxEntries') ?? '50')
 
         try {
-          const entries = await readBackfill(record.streamKey, backfillSeconds, maxEntries)
+          const entries = readBackfill(record.streamKey, backfillSeconds, maxEntries)
           return json({ entries, totalEntries: entries.length })
         } catch (err) {
           return json({ error: (err as Error).message }, 500)
@@ -221,16 +219,13 @@ async function boot() {
   console.error(`[livetap] daemon listening on http://127.0.0.1:${PORT}`)
 }
 
-async function readBackfill(streamKey: string, backfillSeconds: number, maxEntries: number): Promise<StreamEntry[]> {
-  const since = (Date.now() - backfillSeconds * 1000).toString()
-  const raw = await redis.client.xrange(streamKey, since, '+', 'COUNT', maxEntries)
-  return raw.map(([id, fieldArray]) => {
-    const fields: Record<string, string> = {}
-    for (let i = 0; i < fieldArray.length; i += 2) {
-      fields[fieldArray[i]] = fieldArray[i + 1]
-    }
-    return { id, fields, ts: parseInt(id.split('-')[0]) }
-  })
+function readBackfill(streamKey: string, backfillSeconds: number, maxEntries: number): StreamEntry[] {
+  const sinceMs = Date.now() - backfillSeconds * 1000
+  return store.range(streamKey, sinceMs, maxEntries).map((e) => ({
+    id: e.id,
+    fields: e.fields,
+    ts: parseInt(e.id.split('-')[0]),
+  }))
 }
 
 function json(data: unknown, status = 200) {
@@ -245,7 +240,7 @@ async function shutdown() {
   console.error('[livetap] shutting down...')
   await watchers.stopAll()
   await manager.destroyAll()
-  await redis.stop()
+  store.stop()
   process.exit(0)
 }
 

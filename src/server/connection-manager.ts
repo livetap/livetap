@@ -2,7 +2,7 @@
  * Connection Manager — creates, tracks, and destroys data source connections.
  */
 
-import type Redis from 'ioredis'
+import type { StreamStore } from './stream-store.js'
 import type { ConnectionConfig, ConnectionRecord, ConnectionStatus, Subscriber } from './types.js'
 import { MqttSubscriber } from './connections/mqtt.js'
 import { WebhookIngestor } from './connections/webhook.js'
@@ -18,12 +18,10 @@ function generateId(): string {
 
 export class ConnectionManager {
   private connections = new Map<string, ConnectionRecord>()
-  private redis: Redis
-  private redisUrl: string
+  private store: StreamStore
 
-  constructor(redis: Redis, redisUrl: string) {
-    this.redis = redis
-    this.redisUrl = redisUrl
+  constructor(store: StreamStore) {
+    this.store = store
   }
 
   async create(config: ConnectionConfig, name?: string): Promise<ConnectionRecord> {
@@ -51,27 +49,27 @@ export class ConnectionManager {
       record.subscriber = new MqttSubscriber({
         config,
         streamKey,
-        redis: this.redis,
+        store: this.store,
         onMessage,
       })
     } else if (config.type === 'webhook') {
       record.subscriber = new WebhookIngestor({
         streamKey,
-        redis: this.redis,
+        store: this.store,
         onMessage,
       })
     } else if (config.type === 'websocket') {
       record.subscriber = new WsSubscriber({
         config,
         streamKey,
-        redis: this.redis,
+        store: this.store,
         onMessage,
       })
     } else if (config.type === 'file') {
       record.subscriber = new FileSubscriber({
         config,
         streamKey,
-        redis: this.redis,
+        store: this.store,
         onMessage,
       })
     } else {
@@ -88,10 +86,8 @@ export class ConnectionManager {
     }, 5000)
 
     // Buffered count tracking (every 5s)
-    record.bufferedInterval = setInterval(async () => {
-      try {
-        record.bufferedCount = await this.redis.xlen(streamKey)
-      } catch { /* ignore */ }
+    record.bufferedInterval = setInterval(() => {
+      record.bufferedCount = this.store.len(streamKey)
     }, 5000)
 
     this.connections.set(id, record)
@@ -119,7 +115,7 @@ export class ConnectionManager {
     if (record.bufferedInterval) clearInterval(record.bufferedInterval)
 
     await record.subscriber.stop()
-    await this.redis.del(record.streamKey)
+    this.store.del(record.streamKey)
     this.connections.delete(id)
     return true
   }

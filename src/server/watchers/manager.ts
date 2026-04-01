@@ -8,6 +8,7 @@ import { resolve } from 'path'
 import { homedir } from 'os'
 import type { StreamStore, StreamEntry } from '../stream-store.js'
 import type { WatcherCondition, WatcherDefinition, WatcherInfo, WatcherAlert, WatcherAction } from './types.js'
+import { resolveDotPath } from './engine.js'
 import { VALID_OPS } from './types.js'
 import { evaluateWatcher, extractMatchedValues, formatExpression } from './engine.js'
 
@@ -195,7 +196,7 @@ export class WatcherManager {
 
         // Log missing fields (throttled: once per field per minute)
         for (const c of def.conditions) {
-          const val = resolveDotPathImport(payload, c.field)
+          const val = resolveDotPath(payload, c.field)
           if (val === undefined) {
             const last = fieldNotFoundThrottle.get(c.field) ?? 0
             if (Date.now() - last > 60_000) {
@@ -317,7 +318,3 @@ export class WatcherManager {
   }
 }
 
-// Import from engine to avoid circular
-function resolveDotPathImport(obj: any, path: string): any {
-  return path.split('.').reduce((o, k) => o?.[k], obj)
-}

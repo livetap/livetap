@@ -1,8 +1,36 @@
 ---
-description: Use Bun instead of Node.js, npm, pnpm, or vite.
-globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"
-alwaysApply: false
+description: LiveTap project rules — canonical data, Bun, doc system.
+globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, *.md, package.json"
+alwaysApply: true
 ---
+
+## LiveTap Project Rules
+
+### Documentation: Single Source of Truth
+
+All user-facing and agent-facing documentation is generated from canonical data in `src/shared/canonical/`.
+
+**NEVER edit these files directly:**
+- `README.md` — generated from canonical data by Claude Code at publish time
+- `CONTRIBUTING.md` — generated from canonical data by Claude Code at publish time
+
+**To change documentation, edit the canonical source:**
+- Tool schemas → `src/shared/canonical/tools.ts`
+- CLI commands → `src/shared/canonical/cli.ts`
+- Everything else (descriptions, operators, source types, examples, do-not rules, tips, data shapes) → `src/shared/canonical/meta.ts`
+- Barrel re-export → `src/shared/canonical/index.ts`
+
+**After changing canonical data:**
+1. Run `bun test` — drift detection tests (`tests/phase0/canonical-drift.test.ts`) verify all doc surfaces reference all canonical entries
+2. Regenerate README.md and CONTRIBUTING.md from canonical data (use `/lt-push` skill or regenerate manually following `META.readmeSpec` and `META.contributingSpec`)
+3. Sync `package.json` description with `META.npmDescription` if changed
+
+**Runtime generators** (these read canonical data automatically, no regeneration needed):
+- `--help` → `generateHelpText()` in `src/shared/catalog-generators.ts`
+- `--llm-help` → `generateLlmHelp()` in `src/shared/catalog-generators.ts`
+- MCP instructions → `generateInstructions()` in `src/shared/catalog-generators.ts`
+
+### Bun
 
 Default to using Bun instead of Node.js.
 

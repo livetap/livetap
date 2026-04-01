@@ -1,0 +1,13 @@
+# Canonical data — any change here affects all doc surfaces
+/src/shared/canonical/   @rsafaya-edrv
+
+# Project rules for AI agents
+/CLAUDE.md               @rsafaya-edrv
+
+# Generated files — should only change via /lt-push, not direct edits
+/README.md               @rsafaya-edrv
+/CONTRIBUTING.md         @rsafaya-edrv
+
+# MCP instructions and tool registration
+/src/shared/catalog-generators.ts  @rsafaya-edrv
+/src/mcp/tools.ts                  @rsafaya-edrv

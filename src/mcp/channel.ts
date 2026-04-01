@@ -10,8 +10,11 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { readFileSync } from 'fs'
 import { registerTools } from './tools.js'
 import { generateInstructions } from '../shared/catalog-generators.js'
+
+const PKG = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url).pathname, 'utf-8'))
 
 const DAEMON_PORT = parseInt(process.env.LIVETAP_PORT || '8788')
 const DAEMON_URL = `http://127.0.0.1:${DAEMON_PORT}`
@@ -101,7 +104,7 @@ async function main() {
   }
 
   const mcp = new Server(
-    { name: 'LiveTap', version: '0.1.4' },
+    { name: 'LiveTap', version: PKG.version },
     {
       capabilities: {
         experimental: { 'claude/channel': {} },

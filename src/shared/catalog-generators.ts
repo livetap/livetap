@@ -4,6 +4,11 @@
 
 import { CLI_COMMANDS, type CatalogCommand } from './command-catalog.js'
 import { TOOLS } from '../mcp/tools.js'
+import { readFileSync } from 'fs'
+import { resolve } from 'path'
+
+const PKG = JSON.parse(readFileSync(resolve(import.meta.dir, '../../package.json'), 'utf-8'))
+const VERSION: string = PKG.version
 
 /**
  * Generate human-readable --help text.
@@ -51,7 +56,7 @@ export function generateHelpText(): string {
 export function generateLlmHelp(): object {
   return {
     name: 'LiveTap',
-    version: '0.1.4',
+    version: VERSION,
     description: 'Push live data streams into your AI coding agent',
     setup: {
       steps: [

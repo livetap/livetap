@@ -171,8 +171,8 @@ livetap unwatch <watcherId>                                  # Remove
 | **MQTT** | `livetap tap mqtt://broker.emqx.io:1883/sensors/#` | IoT sensors, home automation |
 | **WebSocket** | `livetap tap wss://stream.binance.com:9443/ws/btcusdt@trade` | Finance, real-time APIs |
 | **File tailing** | `livetap tap file:///var/log/nginx/error.log` | Log monitoring, DevOps |
-| Webhooks | Planned v0.1 | CI/CD, external services |
-| Kafka | Planned v0.2 | Event sourcing, analytics |
+| **Webhook** | `livetap tap webhook` | CI/CD, external services |
+| Kafka | Planned | Event sourcing, analytics |
 
 ## MCP tools
 
@@ -253,9 +253,9 @@ The agent knows field paths differ by source:
 
 ```bash
 git clone https://github.com/livetap/livetap.git
-cd livetap && git checkout v0
+cd livetap
 bun install
-bun test                         # 103 tests
+bun test                         # 121 tests
 bun test tests/phase1/           # Specific phase
 SKIP_LIVE_MQTT=1 bun test        # Skip tests needing broker.emqx.io
 ```
@@ -268,7 +268,7 @@ See [docs/PLAN.md](docs/PLAN.md) for the full build plan with phased architectur
 2. `bun install && bun test`
 3. Make changes, add tests
 4. `bun test` must pass
-5. PR to `v0` branch
+5. PR to `main` branch
 
 See [docs/PLAN.md](docs/PLAN.md) for architecture and module layout.
 

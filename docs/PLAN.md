@@ -131,13 +131,24 @@ Requirements: Bun, Claude Code v2.1.80+
 
 ## Phase 1: Bulletproof Daemon Lifecycle
 
-### Problem
+### Target UX
 
-The install flow breaks on first interaction:
-1. ~~MCP proxy auto-starts daemon with 10s timeout — too tight for Redis boot (5-8s)~~ Redis removed — but daemon still needs HTTP server to be ready
-2. Tool proxy has zero retry logic — one failed fetch = immediate error to agent
-3. Daemon spawned without `proc.unref()` — dies when parent exits
-4. Daemon path is hardcoded relative (`src/server/index.ts`) — breaks for npm installs
+**First install (agent steps):**
+1. Agent runs `npm install livetap`
+2. Agent runs `npx livetap setup` → writes .mcp.json → **starts daemon** → spinner → "Daemon ready on :8788"
+3. Agent tells user to restart Claude Code
+4. User restarts → MCP proxy boots → daemon already running → tools work immediately
+
+**Resume after closing laptop / killing terminal / rebooting:**
+1. Daemon survives parent exit (`unref()` + PID file)
+2. User reopens Claude Code → MCP proxy boots → checks `/status` → daemon alive → tools work
+3. If daemon died → MCP proxy calls `npx livetap start` → waits 30s → works
+4. If that fails → tool proxy retries on first tool call, auto-starts daemon, mentions restart in response
+5. Last resort → clear error: "Daemon could not be started. Run `livetap start` manually."
+
+Multiple layers of self-healing. No single point of failure.
+
+---
 
 ### 1A. Start daemon during `npx livetap setup`
 
@@ -147,13 +158,13 @@ After writing `.mcp.json`, setup also boots the daemon:
 npx livetap setup
   → writes .mcp.json
   → starts daemon via `livetap start` CLI
-  → shows ASCII spinner with progressive status:
+  → shows ASCII spinner:
       Starting daemon... ✓
       Daemon ready on :8788
   → prints "Next: restart Claude Code with ..."
 ```
 
-By the time the user restarts Claude Code, the daemon is already warm. With Redis removed, daemon startup is near-instant (just `Bun.serve()`).
+Daemon startup is near-instant (just `Bun.serve()`, no Redis). By the time user restarts Claude Code, daemon is warm.
 
 ### 1B. Single daemon start code path
 
@@ -162,7 +173,7 @@ All daemon starts go through `livetap start` CLI — no duplicate spawn logic:
 - MCP proxy auto-start (`channel.ts`) → calls `npx livetap start`
 - Tool proxy retry (`tools.ts`) → calls `npx livetap start`
 
-This eliminates the hardcoded relative path problem (CLI knows how to find the daemon entry point) and ensures consistent behavior everywhere.
+This eliminates path bugs and ensures consistent behavior everywhere.
 
 ### 1C. Full daemonization
 
@@ -195,7 +206,6 @@ Keep `autoStartDaemon()` in `channel.ts` as safety net for when daemon dies betw
 
 - Calls `npx livetap start` (not Bun.spawn directly)
 - Increase timeout from 10s → 30s
-- Add `proc.unref()` so proxy can exit cleanly
 
 ### 1E. Retry-in-tool-proxy
 
@@ -209,15 +219,7 @@ In `tools.ts`, when `fetch()` to daemon fails:
 
 ### 1F. Status MCP tool
 
-Add `status` as 13th MCP tool, mirroring the CLI `livetap status` command:
-
-```json
-{
-  "name": "status",
-  "description": "Check daemon health and active resources",
-  "inputSchema": {}
-}
-```
+Add `status` as 13th MCP tool, mirroring CLI `livetap status`:
 
 Returns: daemon up/down, uptime, port, active connection count, active watcher count, version.
 
@@ -225,18 +227,24 @@ Agent uses this for troubleshooting — not required on every session start.
 
 ### 1G. SSE auto-reconnect
 
-Existing `connectToSSE()` in `channel.ts` already retries every 5s on failure. Verify this works correctly after a full daemon restart. If the SSE endpoint changes behavior on restart, handle reconnection gracefully.
+Existing `connectToSSE()` already retries every 5s. Verify it works after a full daemon restart.
 
-### 1H. Update --llm-help instructions
+### 1H. Update all docs, help, and instructions
 
-Update setup steps to reflect new flow:
-- Step 2 becomes: "npx livetap setup (creates .mcp.json AND starts daemon)"
-- Keep restart command explicit: `claude --dangerously-load-development-channels server:livetap --continue`
-- Add: "If a tool returns 'daemon was restarted', this is normal — the daemon auto-heals"
+Every user/agent-facing surface must reflect the new daemon lifecycle:
 
-### 1I. Update command catalog
-
-Add `status` to CLI_COMMANDS in `src/shared/command-catalog.ts`. Ensure MCP TOOLS array includes the new status tool. Update `generateInstructions()` to mention the status tool.
+| File | What changes |
+|------|-------------|
+| `src/cli/setup.ts` | Add daemon start after writing .mcp.json, ASCII spinner, wait for healthy |
+| `src/cli/start.ts` | Add `proc.unref()`, PID file write to `~/.livetap/daemon.pid`, stale PID check |
+| `src/cli/stop.ts` | Read PID file, check port, handle stale PID with clear messages |
+| `src/cli/status.ts` | Show PID info, handle daemon-down state |
+| `src/mcp/channel.ts` | Auto-start via `npx livetap start` (not Bun.spawn), 30s timeout |
+| `src/mcp/tools.ts` | Add retry-on-fail with daemon restart + `status` tool (13th) |
+| `src/shared/command-catalog.ts` | Update `setup` description: "creates .mcp.json and starts daemon". Add `status` to MCP tools list. |
+| `src/shared/catalog-generators.ts` | Update --llm-help Step 2: "setup creates .mcp.json AND starts daemon". Remove do_not rule "Do NOT start the daemon manually". Add "daemon auto-heals" note. Add status tool to MCP instructions. |
+| `README.md` | Update quick start (remove manual `livetap start` step). Update "if daemon is not running" section. Update requirements (just Bun + Claude Code). |
+| `CONTRIBUTING.md` | Update architecture description for daemon lifecycle. |
 
 ---
 
@@ -248,9 +256,11 @@ Add `status` to CLI_COMMANDS in `src/shared/command-catalog.ts`. Ensure MCP TOOL
 4. **Phase 0D:** Replace Redis in daemon index.ts, update tests, remove deps
 5. **Phase 0E:** Run full test suite, verify everything passes
 6. **Phase 0F:** Update all Redis references in docs (README, CONTRIBUTING, CLAUDE.md, CLI, MCP tools, memory)
-7. **Phase 1A-1C:** Daemon lifecycle (setup starts daemon, daemonize, PID file)
-8. **Phase 1D-1E:** MCP proxy fallback + tool retry
-9. **Phase 1F-1I:** Status tool, SSE reconnect, update docs/catalog
+7. **Phase 1A-1C:** Daemon lifecycle (setup starts daemon, daemonize with unref + PID file, start.ts/stop.ts)
+8. **Phase 1D-1E:** MCP proxy fallback (channel.ts via CLI) + tool retry (tools.ts)
+9. **Phase 1F:** Status MCP tool (13th tool)
+10. **Phase 1G:** SSE reconnect verification
+11. **Phase 1H:** Update ALL docs/help/instructions (10 files — see table in 1H)
 
 ---
 

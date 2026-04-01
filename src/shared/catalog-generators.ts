@@ -1,9 +1,9 @@
 /**
- * Generates help text, --llm-help JSON, and MCP instructions from the command catalog.
+ * Generates help text, --llm-help JSON, and MCP instructions from canonical data.
+ * All generators consume the single source of truth in ./canonical/.
  */
 
-import { CLI_COMMANDS, type CatalogCommand } from './command-catalog.js'
-import { TOOLS } from '../mcp/tools.js'
+import { CLI_COMMANDS, type CatalogCommand, TOOLS, META } from './canonical/index.js'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 
@@ -15,18 +15,17 @@ const VERSION: string = PKG.version
  */
 export function generateHelpText(): string {
   const lines: string[] = [
-    'LiveTap — Push live data streams into your AI coding agent',
+    `${META.name} — ${META.description}`,
     '',
     'Usage:',
   ]
 
-  // Group: setup, daemon, connections, sampling, watchers
-  const groups: { label: string; commands: string[] }[] = [
-    { label: '', commands: ['setup'] },
-    { label: '', commands: ['start', 'stop', 'status'] },
-    { label: '', commands: ['tap', 'untap', 'taps'] },
-    { label: '', commands: ['sip'] },
-    { label: '', commands: ['watch', 'unwatch', 'watchers'] },
+  const groups: { commands: string[] }[] = [
+    { commands: ['setup'] },
+    { commands: ['start', 'stop', 'status'] },
+    { commands: ['tap', 'untap', 'taps'] },
+    { commands: ['sip'] },
+    { commands: ['watch', 'unwatch', 'watchers'] },
   ]
 
   for (const group of groups) {
@@ -55,23 +54,12 @@ export function generateHelpText(): string {
  */
 export function generateLlmHelp(): object {
   return {
-    name: 'LiveTap',
+    name: META.name,
     version: VERSION,
-    description: 'Push live data streams into your AI coding agent',
+    description: META.description,
     setup: {
-      steps: [
-        'Step 1: npm install livetap (skip if already installed)',
-        'Step 2: npx livetap setup (creates .mcp.json and starts the daemon — do NOT create .mcp.json manually)',
-        'Step 3: Tell user to restart Claude Code: claude --dangerously-load-development-channels server:livetap --continue',
-        'Step 4: After restart, use create_connection to connect, read_stream to sample, create_watcher to alert',
-      ],
-      do_not: [
-        'Do NOT add livetap to ~/.claude/mcp.json — it goes in .mcp.json in the project root',
-        'Do NOT configure livetap as type:http — it is a stdio MCP server (command + args)',
-        'Do NOT worry about the daemon — setup starts it, and the MCP proxy auto-starts it if needed',
-        'Do NOT guess field names — always read_stream first to see actual payload structure',
-        'Do NOT use npm init — use the existing project directory',
-      ],
+      steps: META.setupSteps,
+      do_not: META.doNotRules,
     },
     commands: CLI_COMMANDS,
     mcp_tools: TOOLS,
@@ -80,21 +68,50 @@ export function generateLlmHelp(): object {
 
 /**
  * Generate MCP instructions string for the LLM.
- * References actual tool names from the TOOLS array.
+ * Assembled entirely from canonical data — no hand-written prose.
  */
 export function generateInstructions(): string {
   const toolNames = TOOLS.map((t) => t.name)
   const connectionTools = toolNames.filter((n) => n.includes('connection'))
   const watcherTools = toolNames.filter((n) => n.includes('watcher') || n.includes('watch'))
 
+  // Build source type examples for CONNECT section
+  const sourceExamples = META.sourceTypes
+    .filter((s) => s.status !== 'built-deferred')
+    .map((s) => {
+      switch (s.type) {
+        case 'mqtt':
+          return `   - MQTT: create_connection({ type: "mqtt", broker: "hostname", port: 1883, tls: false, topics: ["topic/#"], username: "", password: "" })`
+        case 'websocket':
+          return `   - WebSocket: create_connection({ type: "websocket", url: "wss://..." })`
+        case 'file':
+          return `   - File: create_connection({ type: "file", path: "/var/log/app.log" }) → tails the file for new lines`
+        default:
+          return `   - ${s.type}: create_connection(${s.params})`
+      }
+    })
+    .join('\n')
+
+  // Build operator list from canonical
+  const operatorList = META.operators.join(', ')
+
+  // Build data shape section from canonical
+  const dataShapeLines = META.dataShapes.map((ds) => {
+    return `- ${ds.source} (${ds.format}): ${ds.description}\n  ${ds.usage}`
+  }).join('\n')
+
+  // Build alert guidance from canonical
+  const alertGuidanceLines = META.alertGuidance.map((g) => `- ${g}`).join('\n')
+
+  // Build tips section from canonical
+  const tipLines = META.tips.map((t) => `- ${t}`).join('\n')
+
   return `
 You have access to LiveTap, a live data streaming tool. Use it to connect to data sources, sample streams, and set up expression-based watchers that alert you when conditions match.
 
 WORKFLOW:
 1. CONNECT: Use create_connection to tap into a data source.
-   - MQTT: create_connection({ type: "mqtt", broker: "hostname", port: 1883, tls: false, topics: ["topic/#"], username: "", password: "" })
-   - WebSocket: create_connection({ type: "websocket", url: "wss://..." })
-   - File: create_connection({ type: "file", path: "/var/log/app.log" }) → tails the file for new lines
+${sourceExamples}
    Note: for MQTT, set tls: false and port: 1883 for unencrypted brokers.
 
 2. SAMPLE: Use read_stream to inspect what data is flowing.
@@ -104,7 +121,7 @@ WORKFLOW:
 
 3. WATCH: Use create_watcher to set up expression-based alerts.
    - create_watcher({ connectionId: "conn_xxx", conditions: [{ field: "sensors.temperature.value", op: ">", value: 50 }], match: "all", cooldown: 60 })
-   - Supported operators: >, <, >=, <=, ==, !=, contains, matches (regex)
+   - Supported operators: ${operatorList} (regex)
    - match: "all" = AND (all conditions must be true), "any" = OR (at least one)
    - cooldown: seconds between repeated alerts. Use 0 for rare events, 30-60 for sensors, 300+ for high-frequency.
    - Alerts arrive as <channel> events. When you see one, act on it as the user requested.
@@ -119,6 +136,9 @@ CHANNEL EVENTS:
 - <channel source="LiveTap" type="alert"> = a watcher condition matched. Read the payload and act on it.
   The payload contains: watcherId, expression, matched_values, and the full stream entry.
 
+WHEN AN ALERT FIRES:
+${alertGuidanceLines}
+
 When the user asks to "monitor", "watch", or "alert on" something:
 1. First check list_connections — reuse an existing connection if possible
 2. If no connection exists, create one
@@ -129,21 +149,10 @@ When the user asks to "monitor", "watch", or "alert on" something:
 AVAILABLE TOOLS: ${toolNames.join(', ')}
 
 DATA SHAPE BY SOURCE:
-- MQTT/WebSocket: entries have { payload: "{...json...}", topic: "..." }. The payload is parsed as JSON.
-  Use dot-paths into the parsed JSON: "sensors.temperature.value", "metadata.device_name"
-- File (plain text lines): entries have { payload: "the raw line", format: "text" }.
-  Use field "payload" with contains/matches: { field: "payload", op: "contains", value: "ERROR" }
-  or { field: "payload", op: "matches", value: "5[0-9]{2}" }
-- File (JSON lines): entries have { payload: "{...json...}", format: "json" }. Parsed as JSON.
-  Use dot-paths like MQTT: "level", "msg", "status"
+${dataShapeLines}
 - IMPORTANT: always use read_stream first to see the actual field names. Do NOT guess — the field is "payload", not "line" or "message".
 
 TIPS:
-- The daemon auto-starts when needed. If a tool returns "daemon was restarted", just retry your request.
-- Watcher IDs (w_xxx) are globally unique. You don't need the connectionId to get, update, or delete a watcher.
-- Common MQTT brokers: broker.emqx.io (public demo), test.mosquitto.org (public test).
-- For regex watchers, use the "matches" operator: { field: "payload", op: "matches", value: "ERROR|FATAL" }
-- If a field path doesn't exist in the payload, the condition evaluates to false (no crash, no error).
-- Fields with dots in the key name (like OBIS codes "2.8.0") are looked up as literal keys first, then as dot-paths.
+${tipLines}
 `.trim()
 }

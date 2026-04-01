@@ -4,29 +4,36 @@
 
 Connect MQTT brokers, WebSocket feeds, or tail log files. Your agent samples, watches, and acts on real-time data through natural language.
 
-<!-- TODO: Add demo GIF here after recording -->
-<!-- ![livetap demo](demo.gif) -->
+![Claude Code connects to a live MQTT stream of solar inverter data, samples payloads with OBIS codes, and creates a watcher for high power consumption (16.7.0 > 3000W). When the alert fires, it autonomously formats the data and analyzes the reading.](docs/images/demo-setup.png)
+*Real solar inverter data — from natural language request to live alert in under 30 seconds*
+
+![A second alert fires and Claude Code autonomously compares previous and current values, noting consumption increased by 174W and is still climbing. It formats a comparison table and recommends investigation.](docs/images/demo-alert.png)
+*Escalating alerts — the agent compares values across alerts and analyzes trends autonomously*
 
 ## Quick start
 
-**Requirements:** [Bun](https://bun.sh), Claude Code v2.1.80+
+**Requirements:** [Bun](https://bun.sh) or Node.js 18+, Claude Code v2.1.80+
 
 ```bash
-bun add livetap
+npm install livetap
+npx livetap setup
 ```
 
-Set up and start Claude Code:
+Restart Claude Code with Channels enabled:
 
 ```bash
-livetap setup
-claude --dangerously-load-development-channels server:livetap
+claude --dangerously-load-development-channels server:livetap --continue
 ```
+
+> **What's that flag?** Claude Code [Channels](https://code.claude.com/docs/en/channels) let MCP servers push real-time events (like watcher alerts) into your conversation. The `--dangerously-load-development-channels` flag enables this for locally-installed servers. It only loads servers listed in your project's `.mcp.json` — nothing is sent externally.
 
 Then ask your agent:
 
 > "Connect to the IoT demo at mqtt://broker.emqx.io on topic justinx/demo/# and watch for temperature above 23 degrees"
 
-## Setup with Claude Code (for AI agents)
+The agent connects to the free public MQTT broker, samples the data to learn the payload structure, creates a watcher, and alerts you when temperature exceeds 23C.
+
+## Setup for AI agents
 
 If you are Claude Code or another AI agent, run `npx livetap --llm-help` for structured setup instructions.
 
@@ -39,49 +46,25 @@ npx livetap setup            # Step 2: creates .mcp.json and starts daemon
 #   claude --dangerously-load-development-channels server:livetap --continue
 ```
 
+After restart, your 13 MCP tools are automatically available — no discovery step needed.
+
 **IMPORTANT — do NOT:**
 - Add livetap to `~/.claude/mcp.json` — it goes in `.mcp.json` in the project root
 - Configure livetap as `type: "http"` — it is a stdio MCP server (command + args)
 - Worry about the daemon — setup starts it, and the MCP proxy auto-starts it if needed
 - Guess field names — always `read_stream` first to see actual payload structure
+- Use `npm init` — use the existing project directory
 
-### After restart — use MCP tools
-
-Once restarted with the channel flag, you have 13 MCP tools available. Follow this workflow:
+### After restart — workflow
 
 1. **CONNECT** — `create_connection({ type: "mqtt", broker: "broker.emqx.io", port: 1883, tls: false, topics: ["justinx/demo/#"] })`
 2. **SAMPLE** — `read_stream({ connectionId: "conn_xxx", backfillSeconds: 60, maxEntries: 10 })` — ALWAYS sample first to see field paths
 3. **WATCH** — `create_watcher({ connectionId: "conn_xxx", conditions: [{ field: "sensors.temperature.value", op: ">", value: 50 }], match: "all", cooldown: 60 })`
-
-### Supported source types
-
-| Type | create_connection params | CLI |
-|------|------------------------|-----|
-| MQTT | `{ type: "mqtt", broker: "host", port: 1883, tls: false, topics: ["topic/#"] }` | `livetap tap mqtt://host:1883/topic/#` |
-| WebSocket | `{ type: "websocket", url: "wss://..." }` | `livetap tap wss://...` |
-| File | `{ type: "file", path: "/var/log/app.log" }` | `livetap tap file:///var/log/app.log` |
-
-### Data shape by source
-
-- **MQTT/WebSocket (JSON):** payload is parsed. Use dot-paths: `sensors.temperature.value`
-- **File (plain text):** field is `payload`. Use: `{ field: "payload", op: "contains", value: "ERROR" }` or `{ field: "payload", op: "matches", value: "5[0-9]{2}" }`
-- **File (JSON lines):** parsed. Use dot-paths: `level`, `msg`
-- **IMPORTANT:** always `read_stream` first. The field is `payload`, NOT `line` or `message`.
-
-### Watcher operators
-
-`>`, `<`, `>=`, `<=`, `==`, `!=`, `contains`, `matches` (regex)
-
-### If the daemon is not running
-
-The daemon auto-starts on setup and on MCP proxy init, and retries on failed requests. If it still fails, run:
-```bash
-livetap start
-```
+4. **ACT** — when `<channel>` alerts arrive, do what the user asked
 
 ## What it does
 
-livetap runs a background daemon that connects to live data sources, buffers messages in memory, and pushes alerts into your Claude Code session via the [Channels API](https://code.claude.com/docs/en/channels). Your agent sees the data in real-time and can create expression-based watchers that fire when conditions match.
+LiveTap runs a background daemon that connects to live data sources, buffers messages in an in-memory StreamStore, and pushes alerts into your Claude Code session via the [Channels API](https://code.claude.com/docs/en/channels). Your agent sees the data in real-time and can create expression-based watchers that fire when conditions match.
 
 ```
 Source (MQTT/WS/File) ──> Subscriber ──> StreamStore ──> Watcher Engine
@@ -92,26 +75,37 @@ Source (MQTT/WS/File) ──> Subscriber ──> StreamStore ──> Watcher Eng
                                                             ──> agent acts
 ```
 
+## Supported sources and data shapes
+
+| Type | create_connection params | CLI | Payload format |
+|------|------------------------|-----|----------------|
+| **MQTT** | `{ type: "mqtt", broker, port, tls, topics, username?, password? }` | `livetap tap mqtt://host:port/topic/#` | JSON parsed — use dot-paths: `sensors.temperature.value` |
+| **WebSocket** | `{ type: "websocket", url, headers?, handshake? }` | `livetap tap wss://...` | JSON parsed — use dot-paths: `p`, `data.value` |
+| **File** | `{ type: "file", path }` | `livetap tap file:///path/to/log` | Plain text: `{ payload: "the raw line" }`. JSON lines: parsed into dot-paths |
+
+**IMPORTANT:** always `read_stream` first to see actual field names. The field is `payload`, NOT `line` or `message`.
+
 ## Examples
 
 ### IoT sensor monitoring
 
 ```
-You: "Connect to mqtt://broker.emqx.io:1883/justinx/demo/# and watch for temperature above 25°C"
+You: "Connect to mqtt://broker.emqx.io:1883/justinx/demo/# and watch for temperature above 25C"
 
-Agent: Creates connection, samples the data to learn the payload structure,
+Agent: Connects to the free public broker, samples the data to learn the payload structure,
        sets up watcher on sensors.environmental.temperature.value > 25.
-       When it fires, summarizes: "sensor-zone-c hit 25.4°C at 10:05:08Z"
+       When it fires: "sensor-zone-c hit 25.4C at 10:05:08Z"
 ```
 
-### Crypto price alerts
+### WebSocket trade stream
 
 ```
-You: "Tap the Binance BTC/USDT trade stream and alert me if price drops below 60000"
+You: "Tap the Binance BTC/USDT trade stream and log each trade"
 
 Agent: Connects to wss://stream.binance.com:9443/ws/btcusdt@trade,
-       samples to see the price field is "p" (string),
-       sets up watcher with regex: p matches "^[1-5]" (prices starting with 1-5 = below 60k)
+       samples to discover trade fields (p=price, q=quantity, T=timestamp),
+       sets up a watcher to log each trade. Can filter by quantity or
+       use regex on the symbol field.
 ```
 
 ### Log file monitoring
@@ -120,8 +114,8 @@ Agent: Connects to wss://stream.binance.com:9443/ws/btcusdt@trade,
 You: "Watch my nginx error log for 5xx errors and summarize each one"
 
 Agent: Taps file:///var/log/nginx/error.log,
-       creates watcher: payload matches "5[0-9]{2}",
-       when an error appears, analyzes it:
+       creates regex watcher: payload matches "5[0-9]{2}",
+       summarizes each match:
        "503 Service Unavailable on /api/data — upstream auth-service not responding"
 ```
 
@@ -131,72 +125,32 @@ Agent: Taps file:///var/log/nginx/error.log,
 You: "Monitor /var/log/wifi.log and alert me when WiFi drops"
 
 Agent: Taps the file, samples to see log format, creates regex watcher
-       for power state changes. When you toggle WiFi:
+       for power state changes. Reports outage duration:
        "Wi-Fi powered OFF at 17:51:45, back ON at 17:51:47 (2s outage)"
 ```
 
-## CLI
+### CLI walkthrough (no agent)
+
+You can also use LiveTap directly from the terminal:
 
 ```bash
-# Daemon
-livetap start                                    # Start daemon (auto-started by setup)
-livetap stop                                     # Stop
-livetap status                                   # Dashboard
+# 1. Tap a source
+livetap tap mqtt://broker.emqx.io:1883/justinx/demo/#
 
-# Tap into data sources
-livetap tap mqtt://broker.emqx.io:1883/sensors/# # MQTT broker
-livetap tap wss://stream.binance.com:9443/ws/btcusdt@trade  # WebSocket
-livetap tap file:///var/log/nginx/error.log       # Log file
-livetap taps                                      # List active taps
-livetap untap <connectionId>                      # Remove
+# 2. Sample the data to see what's flowing
+livetap sip conn_xxxx
 
-# Sample data
-livetap sip <connectionId>                        # Pretty JSON output
-livetap sip <connectionId> --raw                  # Raw JSON
+# 3. Set up a watcher
+livetap watch conn_xxxx "sensors.environmental.temperature.value > 25"
 
-# Watchers
-livetap watch <connId> "temperature > 50"                    # Numeric
-livetap watch <connId> "payload matches 'ERROR|FATAL'"       # Regex
-livetap watch <connId> "temp > 50 AND humidity > 90"         # AND
-livetap watch <connId> "price > 70000" --cooldown 300        # Custom cooldown
-livetap watchers                                             # List all
-livetap watchers --logs <watcherId>                          # View logs
-livetap unwatch <watcherId>                                  # Remove
+# 4. Check status
+livetap status
+livetap watchers --logs w_xxxx
 ```
-
-## Supported sources
-
-| Protocol | Example | Use case |
-|----------|---------|----------|
-| **MQTT** | `livetap tap mqtt://broker.emqx.io:1883/sensors/#` | IoT sensors, home automation |
-| **WebSocket** | `livetap tap wss://stream.binance.com:9443/ws/btcusdt@trade` | Finance, real-time APIs |
-| **File tailing** | `livetap tap file:///var/log/nginx/error.log` | Log monitoring, DevOps |
-| **Webhook** | `livetap tap webhook` | CI/CD, external services |
-| Kafka | Planned | Event sourcing, analytics |
-
-## MCP tools
-
-livetap exposes 13 MCP tools that your agent uses automatically:
-
-| Tool | What it does |
-|------|-------------|
-| `create_connection` | Connect to MQTT, WebSocket, or file |
-| `list_connections` | List active connections |
-| `get_connection` | Connection details and stats |
-| `destroy_connection` | Remove a connection |
-| `read_stream` | Sample recent entries from a stream |
-| `create_watcher` | Set up expression-based alerts |
-| `list_watchers` | List watchers |
-| `get_watcher` | Watcher details |
-| `get_watcher_logs` | View MATCH/SUPPRESSED logs |
-| `update_watcher` | Change conditions or cooldown |
-| `delete_watcher` | Remove a watcher |
-| `restart_watcher` | Restart a stopped watcher |
-| `status` | Daemon health, uptime, connections, and watchers summary |
 
 ## Expression watchers
 
-Watchers use structured conditions — not arbitrary code:
+Watchers use structured conditions:
 
 ```json
 {
@@ -211,23 +165,97 @@ Watchers use structured conditions — not arbitrary code:
 
 **Operators:** `>`, `<`, `>=`, `<=`, `==`, `!=`, `contains`, `matches` (regex)
 
-**Cooldown:** Seconds between repeated alerts. `0` for every match, `60` default.
+**Match modes:** `"all"` = AND (all conditions must be true), `"any"` = OR (at least one)
+
+**Cooldown:** Seconds between repeated alerts. `0` for every match, `60` default. Use 0 for rare events, 30-60 for sensors, 300+ for high-frequency streams.
 
 When a watcher fires, the alert arrives as a `<channel>` tag in your Claude Code session. The agent reads it and acts — writing to a file, calling an API, or whatever you asked.
 
-## How the agent uses livetap
+## CLI
 
-The MCP instructions teach the agent this workflow:
+```bash
+# Setup
+livetap setup                                    # Configure .mcp.json, start daemon, print restart instructions
 
-1. **CONNECT** — `create_connection` to tap a source
-2. **SAMPLE** — `read_stream` to see the data shape (always before creating watchers)
-3. **WATCH** — `create_watcher` with the correct field paths
-4. **ACT** — when `<channel>` alerts arrive, do what the user asked
+# Daemon
+livetap start                                    # Start daemon (auto-started by setup)
+livetap start --port 9000                        # Custom port (default 8788, env: LIVETAP_PORT)
+livetap start --foreground                       # Run in foreground (don't detach)
+livetap stop                                     # Stop daemon
+livetap status                                   # Show daemon, taps, and watchers
+livetap status --json                            # JSON output
 
-The agent knows field paths differ by source:
-- **MQTT/WebSocket:** JSON payload parsed — use dot-paths like `sensors.temperature.value`
-- **File (text):** raw line in `payload` field — use `payload contains "ERROR"` or `payload matches "5[0-9]{2}"`
-- **File (JSON lines):** parsed — use dot-paths like `level`, `msg`
+# Tap into data sources
+livetap tap mqtt://broker.emqx.io:1883/sensors/# # MQTT broker
+livetap tap wss://stream.binance.com:9443/ws/btcusdt@trade  # WebSocket
+livetap tap file:///var/log/nginx/error.log       # Log file
+livetap tap connection.json                       # Config from file
+livetap tap <uri> --name "my-source"              # With display name
+livetap taps                                      # List active taps
+livetap untap <connectionId>                      # Remove a tap
+
+# Sample data
+livetap sip <connectionId>                        # Pretty JSON output
+livetap sip <connectionId> --raw                  # Raw JSON
+livetap sip <connectionId> --max 20 --back 120    # 20 entries, last 120 seconds
+
+# Watchers
+livetap watch <connId> "temperature > 50"                    # Numeric
+livetap watch <connId> "payload matches 'ERROR|FATAL'"       # Regex
+livetap watch <connId> "temp > 50 AND humidity > 90"         # AND
+livetap watch <connId> "temp > 50 OR smoke > 0.05"           # OR
+livetap watch <connId> "price > 70000" --cooldown 300        # Custom cooldown
+livetap watch <connId> "status == 'error'" --action webhook:https://...  # Webhook action
+livetap watchers                                             # List all
+livetap watchers <connectionId>                              # Filter by connection
+livetap watchers <watcherId>                                 # Show details
+livetap watchers --logs <watcherId>                          # View evaluation logs
+livetap unwatch <watcherId>                                  # Remove
+```
+
+`livetap --help` for the full reference. `livetap --llm-help` for machine-readable JSON.
+
+## MCP tools
+
+LiveTap exposes 13 MCP tools that your agent uses automatically:
+
+| Tool | What it does |
+|------|-------------|
+| `create_connection` | Connect to MQTT, WebSocket, file, or webhook |
+| `list_connections` | List active connections with status and message rate |
+| `get_connection` | Get detailed connection status |
+| `destroy_connection` | Stop and remove a connection |
+| `read_stream` | Sample recent entries from a stream |
+| `create_watcher` | Set up expression-based alerts |
+| `list_watchers` | List watchers, optionally filter by connection |
+| `get_watcher` | Watcher details: conditions, status, match count |
+| `get_watcher_logs` | View MATCH, SUPPRESSED, FIELD_NOT_FOUND logs |
+| `update_watcher` | Change conditions, match mode, action, or cooldown |
+| `delete_watcher` | Stop and remove a watcher |
+| `restart_watcher` | Restart a stopped watcher |
+| `status` | Daemon health, uptime, connections, and watchers summary |
+
+## Troubleshooting
+
+**Daemon won't start / "Unable to connect"**
+Run `livetap start --foreground` to see error output. Check if port 8788 is in use: `lsof -i :8788`. Use `--port` or `LIVETAP_PORT` env var to change.
+
+**MQTT connection refused**
+Verify the broker is reachable: `nc -zv broker.emqx.io 1883`. Check that `tls: false` and `port: 1883` are set for unencrypted brokers. Brokers on port 8883 typically require `tls: true`.
+
+**Watcher not firing**
+Run `read_stream` (or `livetap sip`) to verify data is flowing. Check field paths match the actual payload structure. View watcher logs: `livetap watchers --logs <watcherId>` — look for FIELD_NOT_FOUND or SUPPRESSED events.
+
+**MCP tools not showing after restart**
+Verify `.mcp.json` exists in the project root (not `~/.claude/mcp.json`). Restart Claude Code with the `--dangerously-load-development-channels server:livetap` flag.
+
+## Limitations
+
+- **In-memory stream buffer** — data does not persist across daemon restarts.
+- **No daemon API auth** — the HTTP API listens on localhost only (port 8788).
+- **Throughput** — tested with streams up to ~50 msg/s. High-throughput streams (1000+ msg/s) may need higher cooldowns on watchers.
+- **Credentials** — MQTT credentials are passed as tool parameters, not stored on disk.
+- **Single instance** — one daemon per port. Multiple projects can share a daemon or use different ports.
 
 ## Configuration
 
@@ -235,19 +263,9 @@ The agent knows field paths differ by source:
 
 **State directory:** `~/.livetap/` stores `daemon.pid`, daemon logs, and watcher evaluation logs.
 
-**MCP config:** `.mcp.json` in your project root:
-```json
-{
-  "mcpServers": {
-    "livetap": {
-      "command": "bun",
-      "args": ["path/to/src/mcp/channel.ts"]
-    }
-  }
-}
-```
+**MCP config:** `npx livetap setup` generates `.mcp.json` in your project root with the correct absolute path.
 
-**Machine-readable help:** `livetap --llm-help` outputs structured JSON for AI agents.
+**Machine-readable help:** `npx livetap --llm-help` outputs structured JSON with setup steps, CLI commands, and MCP tool schemas.
 
 ## Development
 
@@ -255,22 +273,14 @@ The agent knows field paths differ by source:
 git clone https://github.com/livetap/livetap.git
 cd livetap
 bun install
-bun test                         # 121 tests
-bun test tests/phase1/           # Specific phase
-SKIP_LIVE_MQTT=1 bun test        # Skip tests needing broker.emqx.io
+bun test                         # Run all tests
+bun test tests/phase0/           # Canonical drift detection
+SKIP_LIVE_MQTT=1 bun test        # Skip tests needing external brokers
 ```
-
-See [docs/PLAN.md](docs/PLAN.md) for the full build plan with phased architecture.
 
 ## Contributing
 
-1. Fork and clone
-2. `bun install && bun test`
-3. Make changes, add tests
-4. `bun test` must pass
-5. PR to `main` branch
-
-See [docs/PLAN.md](docs/PLAN.md) for architecture and module layout.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, architecture, testing, and PR guidelines.
 
 ## License
 

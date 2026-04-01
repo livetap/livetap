@@ -26,6 +26,19 @@ test('returns undefined for missing path', () => {
   expect(resolveDotPath(payload, 'sensors.foo.bar')).toBeUndefined()
 })
 
+test('resolves literal dotted key (OBIS codes like 2.8.0)', () => {
+  const obis = { '1.8.0': '26316339', '2.8.0': '18919769', '32.7.0': '231.40', timestamp: '2026-04-01' }
+  expect(resolveDotPath(obis, '2.8.0')).toBe('18919769')
+  expect(resolveDotPath(obis, '32.7.0')).toBe('231.40')
+  expect(resolveDotPath(obis, 'timestamp')).toBe('2026-04-01')
+})
+
+test('literal key takes priority over dot-path traversal', () => {
+  // Object has both a literal "a.b" key and a nested a.b path
+  const obj = { 'a.b': 'literal', a: { b: 'nested' } }
+  expect(resolveDotPath(obj, 'a.b')).toBe('literal')
+})
+
 test('returns undefined for empty object', () => {
   expect(resolveDotPath({}, 'a.b.c')).toBeUndefined()
 })

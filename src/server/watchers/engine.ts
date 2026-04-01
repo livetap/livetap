@@ -6,10 +6,15 @@
 import type { WatcherCondition, WatcherDefinition } from './types.js'
 
 /**
- * Resolve a dot-separated path into a nested object.
- * Returns undefined if any segment is missing.
+ * Resolve a field path into an object.
+ * First tries the path as a literal key (handles keys like "2.8.0"),
+ * then falls back to dot-separated nested access (handles "sensors.temperature.value").
  */
 export function resolveDotPath(obj: any, path: string): any {
+  if (obj == null) return undefined
+  // Try literal key first (handles OBIS codes like "2.8.0", "32.7.0")
+  if (path in obj) return obj[path]
+  // Fall back to dot-path traversal
   return path.split('.').reduce((o, k) => o?.[k], obj)
 }
 

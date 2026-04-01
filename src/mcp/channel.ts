@@ -56,7 +56,11 @@ async function autoStartDaemon(): Promise<boolean> {
 async function connectToSSE(mcp: Server) {
   try {
     const res = await fetch(`${DAEMON_URL}/events`)
-    if (!res.ok || !res.body) return
+    if (!res.ok || !res.body) {
+      // Daemon not ready — retry
+      setTimeout(() => connectToSSE(mcp), 5000)
+      return
+    }
 
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
@@ -90,8 +94,10 @@ async function connectToSSE(mcp: Server) {
         }
       }
     }
+    // Clean disconnect (daemon died or restarted) — retry
+    setTimeout(() => connectToSSE(mcp), 5000)
   } catch {
-    // SSE connection failed — retry after delay
+    // SSE connection error — retry after delay
     setTimeout(() => connectToSSE(mcp), 5000)
   }
 }
@@ -121,5 +127,13 @@ async function main() {
   // Start SSE listener for alert delivery (non-blocking)
   connectToSSE(mcp)
 }
+
+// Prevent unhandled errors from crashing the proxy process
+process.on('unhandledRejection', (err) => {
+  console.error('[livetap-mcp] unhandled rejection:', err)
+})
+process.on('uncaughtException', (err) => {
+  console.error('[livetap-mcp] uncaught exception:', err)
+})
 
 main()

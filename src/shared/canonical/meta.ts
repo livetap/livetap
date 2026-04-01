@@ -95,7 +95,7 @@ export const META = {
   tips: [
     'The daemon auto-starts when needed. If a tool returns "daemon was restarted", just retry your request.',
     'Watcher IDs (w_xxx) are globally unique. You don\'t need the connectionId to get, update, or delete a watcher.',
-    'Common MQTT brokers: broker.emqx.io (public demo), test.mosquitto.org (public test).',
+    'Public MQTT streams to try: test.mosquitto.org SHRDZM/# (real smart meter data, ~35 msg/s), test.mosquitto.org Testing/Traffic/Paddy/House/# (simulated, ~50 msg/s), broker.emqx.io justinx/demo/# (low-freq IoT demo).',
     'For regex watchers, use the "matches" operator: { field: "payload", op: "matches", value: "ERROR|FATAL" }',
     'If a field path doesn\'t exist in the payload, the condition evaluates to false (no crash, no error).',
     'Fields with dots in the key name (like OBIS codes "2.8.0") are looked up as literal keys first, then as dot-paths.',
@@ -108,15 +108,45 @@ export const META = {
     'Step 4: After restart, use create_connection to connect, read_stream to sample, create_watcher to alert',
   ],
 
+  demoBrokers: [
+    {
+      name: 'SHRDZM Smart Meters',
+      broker: 'test.mosquitto.org',
+      port: 1883,
+      topic: 'SHRDZM/#',
+      rate: '~35 msg/s',
+      description: 'Real smart meter network data with OBIS codes (power consumption, voltage, energy). JSON payloads with dotted keys like "16.7.0" (active power).',
+      dataType: 'real' as const,
+    },
+    {
+      name: 'Paddy House Traffic',
+      broker: 'test.mosquitto.org',
+      port: 1883,
+      topic: 'Testing/Traffic/Paddy/House/#',
+      rate: '~50 msg/s',
+      description: 'High-frequency simulated home automation data.',
+      dataType: 'simulated' as const,
+    },
+    {
+      name: 'LiveTap IoT Demo',
+      broker: 'broker.emqx.io',
+      port: 1883,
+      topic: 'justinx/demo/#',
+      rate: '~1 msg/s',
+      description: 'Low-frequency IoT sensor demo with temperature, humidity, and environmental readings.',
+      dataType: 'simulated' as const,
+    },
+  ],
+
   examples: [
     {
-      title: 'IoT sensor monitoring',
+      title: 'Smart meter energy monitoring',
       sourceType: 'mqtt' as const,
-      url: 'mqtt://broker.emqx.io:1883/justinx/demo/#',
+      url: 'mqtt://test.mosquitto.org:1883/SHRDZM/#',
       publicBroker: true,
-      fieldPaths: ['sensors.environmental.temperature.value'],
-      condition: 'temperature > 25',
-      narrative: 'Agent connects to the free public broker, samples payload structure, sets watcher on sensors.environmental.temperature.value > 25. Fires: "sensor-zone-c hit 25.4C at 10:05:08Z"',
+      fieldPaths: ['16.7.0', '1.7.0', '2.7.0'],
+      condition: '16.7.0 > 3000',
+      narrative: 'Agent connects to a live smart meter network (~35 msg/s of real data). Samples the stream, discovers OBIS codes like 16.7.0 (active power in watts). Sets watcher for high consumption > 3kW. When it fires, formats a table with device ID, power readings, and timestamps — then compares across alerts to spot escalating trends.',
     },
     {
       title: 'WebSocket trade stream',

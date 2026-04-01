@@ -29,9 +29,9 @@ claude --dangerously-load-development-channels server:livetap --continue
 
 Then ask your agent:
 
-> "Connect to the IoT demo at mqtt://broker.emqx.io on topic justinx/demo/# and watch for temperature above 23 degrees"
+> "Connect to mqtt://test.mosquitto.org on topic SHRDZM/# and alert me when any smart meter reports power consumption above 3000 watts"
 
-The agent connects to the free public MQTT broker, samples the data to learn the payload structure, creates a watcher, and alerts you when temperature exceeds 23C.
+The agent connects to a live smart meter network (~35 msg/s of real data), samples the payloads to discover OBIS codes, creates a watcher on field `16.7.0 > 3000`, and pushes alerts into your conversation via Channels when consumption spikes. It then autonomously analyzes the data — formatting tables, comparing across alerts, and flagging trends.
 
 ## Setup for AI agents
 
@@ -57,9 +57,9 @@ After restart, your 13 MCP tools are automatically available — no discovery st
 
 ### After restart — workflow
 
-1. **CONNECT** — `create_connection({ type: "mqtt", broker: "broker.emqx.io", port: 1883, tls: false, topics: ["justinx/demo/#"] })`
+1. **CONNECT** — `create_connection({ type: "mqtt", broker: "test.mosquitto.org", port: 1883, tls: false, topics: ["SHRDZM/#"] })`
 2. **SAMPLE** — `read_stream({ connectionId: "conn_xxx", backfillSeconds: 60, maxEntries: 10 })` — ALWAYS sample first to see field paths
-3. **WATCH** — `create_watcher({ connectionId: "conn_xxx", conditions: [{ field: "sensors.temperature.value", op: ">", value: 50 }], match: "all", cooldown: 60 })`
+3. **WATCH** — `create_watcher({ connectionId: "conn_xxx", conditions: [{ field: "16.7.0", op: ">", value: 3000 }], match: "all", cooldown: 60 })`
 4. **ACT** — when `<channel>` alerts arrive, do what the user asked
 
 ## What it does
@@ -85,16 +85,27 @@ Source (MQTT/WS/File) ──> Subscriber ──> StreamStore ──> Watcher Eng
 
 **IMPORTANT:** always `read_stream` first to see actual field names. The field is `payload`, NOT `line` or `message`.
 
+### Public MQTT streams to try
+
+| Stream | Broker | Topic | Rate | Data |
+|--------|--------|-------|------|------|
+| **SHRDZM Smart Meters** | `test.mosquitto.org:1883` | `SHRDZM/#` | ~35 msg/s | Real smart meter network — OBIS codes, power consumption, voltage |
+| **Paddy House Traffic** | `test.mosquitto.org:1883` | `Testing/Traffic/Paddy/House/#` | ~50 msg/s | Simulated home automation data |
+| **LiveTap IoT Demo** | `broker.emqx.io:1883` | `justinx/demo/#` | ~1 msg/s | Low-frequency temperature/humidity sensors |
+
 ## Examples
 
-### IoT sensor monitoring
+### Smart meter energy monitoring
 
 ```
-You: "Connect to mqtt://broker.emqx.io:1883/justinx/demo/# and watch for temperature above 25C"
+You: "Connect to mqtt://test.mosquitto.org on topic SHRDZM/# and alert me
+      when any device reports active power above 3000 watts"
 
-Agent: Connects to the free public broker, samples the data to learn the payload structure,
-       sets up watcher on sensors.environmental.temperature.value > 25.
-       When it fires: "sensor-zone-c hit 25.4C at 10:05:08Z"
+Agent: Connects to a live smart meter network (~35 msg/s of real data).
+       Samples the stream, discovers OBIS codes like 16.7.0 (active power in watts).
+       Sets watcher for 16.7.0 > 3000. When it fires, formats a table with
+       device ID, power readings, and timestamps — then compares across alerts
+       to spot escalating trends.
 ```
 
 ### WebSocket trade stream
@@ -134,14 +145,14 @@ Agent: Taps the file, samples to see log format, creates regex watcher
 You can also use LiveTap directly from the terminal:
 
 ```bash
-# 1. Tap a source
-livetap tap mqtt://broker.emqx.io:1883/justinx/demo/#
+# 1. Tap a live smart meter stream
+livetap tap mqtt://test.mosquitto.org:1883/SHRDZM/#
 
 # 2. Sample the data to see what's flowing
 livetap sip conn_xxxx
 
-# 3. Set up a watcher
-livetap watch conn_xxxx "sensors.environmental.temperature.value > 25"
+# 3. Set up a watcher for high power consumption
+livetap watch conn_xxxx "16.7.0 > 3000"
 
 # 4. Check status
 livetap status
@@ -155,8 +166,8 @@ Watchers use structured conditions:
 ```json
 {
   "conditions": [
-    { "field": "sensors.temperature.value", "op": ">", "value": 50 },
-    { "field": "sensors.humidity.value", "op": ">", "value": 90 }
+    { "field": "16.7.0", "op": ">", "value": 3000 },
+    { "field": "1.7.0", "op": ">", "value": 2000 }
   ],
   "match": "all",
   "cooldown": 60
@@ -186,7 +197,7 @@ livetap status                                   # Show daemon, taps, and watche
 livetap status --json                            # JSON output
 
 # Tap into data sources
-livetap tap mqtt://broker.emqx.io:1883/sensors/# # MQTT broker
+livetap tap mqtt://test.mosquitto.org:1883/SHRDZM/#  # Live smart meters
 livetap tap wss://stream.binance.com:9443/ws/btcusdt@trade  # WebSocket
 livetap tap file:///var/log/nginx/error.log       # Log file
 livetap tap connection.json                       # Config from file
@@ -200,7 +211,7 @@ livetap sip <connectionId> --raw                  # Raw JSON
 livetap sip <connectionId> --max 20 --back 120    # 20 entries, last 120 seconds
 
 # Watchers
-livetap watch <connId> "temperature > 50"                    # Numeric
+livetap watch <connId> "16.7.0 > 3000"                      # OBIS code numeric
 livetap watch <connId> "payload matches 'ERROR|FATAL'"       # Regex
 livetap watch <connId> "temp > 50 AND humidity > 90"         # AND
 livetap watch <connId> "temp > 50 OR smoke > 0.05"           # OR
@@ -241,7 +252,7 @@ LiveTap exposes 13 MCP tools that your agent uses automatically:
 Run `livetap start --foreground` to see error output. Check if port 8788 is in use: `lsof -i :8788`. Use `--port` or `LIVETAP_PORT` env var to change.
 
 **MQTT connection refused**
-Verify the broker is reachable: `nc -zv broker.emqx.io 1883`. Check that `tls: false` and `port: 1883` are set for unencrypted brokers. Brokers on port 8883 typically require `tls: true`.
+Verify the broker is reachable: `nc -zv test.mosquitto.org 1883`. Check that `tls: false` and `port: 1883` are set for unencrypted brokers. Brokers on port 8883 typically require `tls: true`.
 
 **Watcher not firing**
 Run `read_stream` (or `livetap sip`) to verify data is flowing. Check field paths match the actual payload structure. View watcher logs: `livetap watchers --logs <watcherId>` — look for FIELD_NOT_FOUND or SUPPRESSED events.

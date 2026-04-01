@@ -65,23 +65,33 @@ Walk through the agent discovery journey:
 
 **Flow coherence:** npm description -> --llm-help -> setup -> restart -> MCP tools
 
-### 5. Verify no stale references
+### 5. Scan for orphan files
+
+Check `git status` for untracked files that shouldn't be in the repo:
+- `*.tgz` — npm pack artifacts (delete, should be in .gitignore)
+- `dump.rdb` — stale Redis snapshots (delete, should be in .gitignore)
+- `*.log` files in the root — stale logs
+- Any file that looks like a build artifact, temp file, or leftover from a previous phase
+
+If found: delete the file, ensure the pattern is in `.gitignore`, and flag it to the user.
+
+### 6. Verify no stale references
 
 - No references to Redis/ioredis in source files (docs/PLAN archives are OK)
 - No hardcoded version strings (should read from package.json)
 - No hardcoded tool/command counts (should derive from arrays)
 
-### 6. Check PLAN.md status
+### 7. Check PLAN.md status
 
 Verify phases marked as "DONE" have code + tests. Phases not built are not marked done.
 
-### 7. Update memory
+### 8. Update memory
 
 Update Claude's persistent memory at `~/.claude/projects/-Users-rupulsafaya-Documents-GitHub-livetap/memory/`:
 - `MEMORY.md` — Current state, key architecture, new gotchas
 - Remove stale or session-specific notes
 
-### 8. Commit and push
+### 9. Commit and push
 
 1. Stage changed files specifically (don't `git add .`)
 2. Write a descriptive commit message
